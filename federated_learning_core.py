@@ -134,6 +134,68 @@ class FLClient:
         # print(f"Client {self.client_id}: Providing local model updates (state_dict).")
         return copy.deepcopy(self.local_model.state_dict())
 
+# ---- CONCEPTUAL INTEGRATION OF ACTOR-CRITIC AGENT TRAINING IN FLCLIENT ----
+#
+# The following outlines how the `ActorCriticAgent`'s training mechanism, specifically
+# its `learn()` method and trajectory collection, would integrate into a
+# Federated Learning (FL) client's local training epoch (e.g., `FLClient.train_local_epoch()`).
+#
+# 1. Model Synchronization:
+#    - The `FLClient` receives the latest global model weights (for both Actor and Critic networks)
+#      from the FL server.
+#    - The client updates its local `ActorCriticAgent` instance with these weights
+#      (e.g., using `agent.actor.load_state_dict()` and `agent.critic.load_state_dict()`).
+#
+# 2. Local Training Loop (`FLClient.train_local_epoch()`):
+#    - This method would typically run for a defined number of local episodes or simulation steps.
+#    - Inside the loop:
+#      a. Episode/Interaction Phase:
+#         - Reset the simulation environment (`simulation_core.py` or its interface) to get an initial `state`.
+#         - For each step in an episode (or for a fixed number of steps, `N_A2C_steps`):
+#           i.   Action Selection: The local `ActorCriticAgent` selects an `action` and `log_prob`
+#                based on the current `state` using `agent.select_action(state)`. The agent should
+#                be in `eval()` mode during interaction.
+#           ii.  Environment Step: The chosen `action` is applied to the `simulation_core.py`,
+#                which returns the `next_state`, `reward`, and `done` status.
+#           iii. Store Experience: The collected tuple `(state, action, reward, next_state, done, log_prob)`
+#                is stored in the agent's internal on-policy trajectory buffer via
+#                `agent.store_experience(...)`.
+#           iv.  State Update: `state = next_state`.
+#           v.   If `done` or if the number of collected experiences reaches a threshold suitable for
+#                an A2C update (e.g., `N_A2C_steps`), proceed to the learning phase.
+#
+#      b. Learning Phase:
+#         - If sufficient experiences have been collected in `agent.trajectory_states`:
+#           i.  Call `actor_loss, critic_loss = agent.learn()`. This method handles:
+#               - Switching the agent to `train()` mode.
+#               - Calculating advantages (GAE) and returns.
+#               - Computing actor and critic losses.
+#               - Performing gradient updates on the local actor and critic networks.
+#               - Clearing the agent's trajectory buffer.
+#               - Switching the agent back to `eval()` mode.
+#         - This learning phase can occur at the end of each episode or after a fixed
+#           number of interaction steps (common in A2C).
+#
+# 3. Result Aggregation:
+#    - After the `train_local_epoch()` has completed (e.g., after a certain number of
+#      local training iterations/episodes or a compute budget is exhausted):
+#    - The updated weights from the local `agent.actor.state_dict()` and
+#      `agent.critic.state_dict()` are extracted.
+#    - These weights (or weight differences/gradients, depending on the FL strategy) are
+#      then sent back to the FL server for aggregation.
+#
+# Key Considerations for FL Integration:
+#    - On-Policy Nature of A2C: Since A2C is on-policy, the experiences collected by a client
+#      are specific to its current local policy. This aligns well with FL where clients
+#      train on their local data (experiences).
+#    - Data Heterogeneity: Different clients might experience different state distributions
+#      from their `simulation_core.py` interactions, leading to heterogeneous experience data.
+#      This is a standard challenge in FL.
+#    - Communication Costs: Sending full model weights can be costly. Strategies like
+#      sending weight deltas or using more advanced aggregation methods might be considered.
+#
+# ---- END OF CONCEPTUAL INTEGRATION NOTES ----
+
 # FLServer Class Definition
 class FLServer:
     def __init__(self, global_model_instance, device):
