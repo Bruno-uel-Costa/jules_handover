@@ -101,7 +101,7 @@ class TestActorCriticLearning(unittest.TestCase):
             msg_part3 = "Consider increasing num_episodes_test or decreasing log_interval if this test fails. "
             msg_part4 = f"Overall average reward: {np.mean(episode_rewards):.2f}"
             print(msg_part1 + msg_part2 + msg_part3 + msg_part4)
-             self.assertTrue(len(episode_rewards) == num_episodes_test, "Training did not complete all episodes.")
+            self.assertTrue(len(episode_rewards) == num_episodes_test, "Training did not complete all episodes.")
         else:
             self.fail("Training loop did not produce enough data or did not run.")
 
