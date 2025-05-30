@@ -645,12 +645,67 @@ if __name__ == "__main__":
         q_cs_comp = calculate_qj_bpp_cs(**cs_example_params_for_comp)
         print(f"  q_j_dist (CS):      {[f'{val:.6f}' for val in q_cs_comp]}")
 
-        diff_sum = sum(abs(q_br_comp[i] - q_cs_comp[i]) for i in range(len(q_br_comp)))
-        print(f"  Soma das diferenças absolutas: {diff_sum:.9f}")
-        if diff_sum < 1e-9:
+        diff_sum_qj = sum(abs(q_br_comp[i] - q_cs_comp[i]) for i in range(len(q_br_comp)))
+        print(f"  Soma das diferenças absolutas q(j): {diff_sum_qj:.9f}")
+        
+        qj_match = diff_sum_qj < 1e-9
+        if qj_match:
             print("  SUCESSO: Distribuições BR (t_k=0) e CS são idênticas.")
+            
+            print("\n  --- Comparando Probabilidades de Bloqueio (BR com t_k=0 vs CS) ---")
+            pb_br_params = {
+                "C_total": br_params_comp["C_total"],
+                "q_j_dist": q_br_comp,
+                "b_k_new": br_params_comp["b_k_new"],
+                "b_k_ho": br_params_comp["b_k_ho"],
+                "t_k_new": br_params_comp["t_k_new"], # Lista de zeros
+                "t_k_ho": br_params_comp["t_k_ho"]  # Lista de zeros
+            }
+            pb_br_results = calculate_blocking_probabilities_br(**pb_br_params)
+            
+            pb_cs_params = {
+                "C_total": cs_example_params_for_comp["C_total"],
+                "q_j_dist": q_cs_comp,
+                "b_k_new": cs_example_params_for_comp["b_k_new"],
+                "b_k_ho": cs_example_params_for_comp["b_k_ho"]
+            }
+            pb_cs_results_dict = calculate_blocking_probabilities_cs(**pb_cs_params)
+            # Adaptar chaves do pb_cs_results_dict para corresponder às de pb_br_results para comparação
+            pb_cs_results_adapted = {
+                'P_B_new': pb_cs_results_dict.get('C_bk_new', []), # Em CS, C_bk = P_B
+                'P_B_handover': pb_cs_results_dict.get('C_bk_ho', [])
+            }
+
+            print(f"    Resultados de Probabilidade de Bloqueio (BR com t_k=0):")
+            for key, value in pb_br_results.items():
+                print(f"      {key}: {[f'{v:.6f}' for v in value]}")
+            
+            print(f"    Resultados de Probabilidade de Bloqueio (CS):")
+            for key, value in pb_cs_results_adapted.items():
+                 print(f"      {key}: {[f'{v:.6f}' for v in value]}")
+
+            # Comparar os dicionários
+            pb_match = True
+            if len(pb_br_results['P_B_new']) != len(pb_cs_results_adapted['P_B_new']) or \
+               len(pb_br_results['P_B_handover']) != len(pb_cs_results_adapted['P_B_handover']):
+                pb_match = False
+            else:
+                for i in range(len(pb_br_results['P_B_new'])):
+                    if abs(pb_br_results['P_B_new'][i] - pb_cs_results_adapted['P_B_new'][i]) > 1e-9:
+                        pb_match = False
+                        break
+                if pb_match:
+                    for i in range(len(pb_br_results['P_B_handover'])):
+                        if abs(pb_br_results['P_B_handover'][i] - pb_cs_results_adapted['P_B_handover'][i]) > 1e-9:
+                            pb_match = False
+                            break
+            
+            if pb_match:
+                print("    SUCESSO: Probabilidades de Bloqueio BR (t_k=0) e CS são idênticas.")
+            else:
+                print("    FALHA: Probabilidades de Bloqueio BR (t_k=0) e CS diferem.")
         else:
-            print("  FALHA: Distribuições BR (t_k=0) e CS diferem.")
+            print("  FALHA: Distribuições q(j) BR (t_k=0) e CS diferem, P_B não será comparado.")
             
     except Exception as e:
         print(f"  Erro durante o teste de comparação: {e}")
@@ -681,24 +736,34 @@ if __name__ == "__main__":
             print(f"  {key}: {value}")
     try:
         q_br_active = calculate_qj_bpp_br(**params_br_active)
-        print(f"  q_j_dist (BR, t_k={t_k_new_br_active_val}): {[f'{val:.6f}' for val in q_br_active]}")
-        print(f"  Soma de q(j): {sum(q_br_active):.6f}")
+        print(f"  Resultados (calculate_qj_bpp_br, t_k={t_k_new_br_active_val}):")
+        print(f"    q_j_dist: {[f'{val:.6f}' for val in q_br_active]}")
+        print(f"    Soma de q(j): {sum(q_br_active):.6f}")
 
-        # Comentário: Espera-se que q(j) para j > (C_total - t_k) sejam afetados (menores ou zero).
-        # Neste exemplo, para j > 3 (ou seja, j=4, j=5), a contribuição desta classe é zero.
-        # Se for a única classe, q(4) e q(5) devem ser 0.0.
         admissible_threshold = C_total_br_active - t_k_new_br_active_val
-        print(f"  (Para esta classe, estados j > {admissible_threshold} não são permitidos pela reserva t_k={t_k_new_br_active_val})")
+        print(f"    (Para esta classe, estados j > {admissible_threshold} não são permitidos pela reserva t_k={t_k_new_br_active_val})")
 
         if len(q_br_active) > admissible_threshold + 1:
-            # Verifica se q(j) é zero para j > admissible_threshold
-            # (Isso só é estritamente verdade se esta for a ÚNICA classe de tráfego)
             are_higher_states_zero = all(abs(q_br_active[j_idx]) < 1e-9 for j_idx in range(admissible_threshold + 1, len(q_br_active)))
             if are_higher_states_zero:
-                print(f"  VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
+                print(f"    VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
             else:
-                print(f"  NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
-        
+                print(f"    NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
+
+        print(f"\n  --- Testando calculate_blocking_probabilities_br com saída de 'Teste BR com Reservas Ativas' ---")
+        pb_br_active_params = {
+            "C_total": params_br_active["C_total"],
+            "q_j_dist": q_br_active,
+            "b_k_new": params_br_active["b_k_new"],
+            "b_k_ho": params_br_active["b_k_ho"],
+            "t_k_new": params_br_active["t_k_new"],
+            "t_k_ho": params_br_active["t_k_ho"]
+        }
+        pb_br_active_results = calculate_blocking_probabilities_br(**pb_br_active_params)
+        print(f"  Resultados de Probabilidade de Bloqueio (BR com t_k > 0):")
+        for key, value in pb_br_active_results.items():
+            print(f"    {key}: {[f'{v:.6f}' for v in value]}")
+
     except Exception as e:
         print(f"  Erro durante o teste BR com reservas ativas: {e}")
     print("-" * 50)
@@ -754,6 +819,196 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"  FALHA no teste de validação: Exceção inesperada: {e}")
     print("-" * 50)
+
+
+def calculate_blocking_probabilities_br(
+    C_total: int,
+    q_j_dist: List[float],
+    b_k_new: List[int],
+    b_k_ho: List[int],
+    t_k_new: List[int],
+    t_k_ho: List[int]
+) -> dict:
+    """
+    Calculates the blocking probabilities for different call classes in a system
+    with a Trunk Reservation (BR) policy, given the channel occupancy 
+    distribution q(j).
+
+    The blocking condition for a class k call (new or handover) requiring b_k 
+    channels, with a reservation threshold t_k (number of channels reserved for 
+    higher priority calls), is that the call is blocked if the number of 
+    currently occupied channels j is such that j + b_k > C_total - t_k.
+
+    Args:
+        C_total: Total capacity of the system in channels (int).
+        q_j_dist: A list of floats representing the normalized channel
+                  occupancy distribution q(j) for j = 0 to C_total.
+                  (Typically the output from calculate_qj_bpp_br).
+        b_k_new: A list of integers, where b_k_new[k] is the number of
+                 channels required by a call of new call class k.
+        b_k_ho: A list of integers, where b_k_ho[k] is the number of
+                channels required by a call of handover call class k.
+        t_k_new: List of trunk reservation parameters (tk) for new call classes.
+                 tk is the number of channels reserved FOR OTHER (higher priority) 
+                 classes. A call of new class k is subject to blocking based on
+                 C_total - t_k_new[k] as its effective capacity.
+                 Length must match b_k_new.
+        t_k_ho: Similar for handover call classes. Length must match b_k_ho.
+
+    Returns:
+        A dictionary containing the blocking probabilities:
+        {
+            'P_B_new': List[float] - Blocking probabilities for new call classes.
+                                   P_B_new[k] is P(blocking for new call class k).
+            'P_B_handover': List[float] - Blocking probabilities for handover call classes.
+                                        P_B_handover[k] is P(blocking for HO class k).
+        }
+        Note: In many models, for circuit-switched systems without retries/queuing,
+        failure probability P_fk is the same as blocking probability P_Bk.
+        This function returns P_B (blocking probability).
+    """
+    # Placeholder for calculation logic
+    
+    # 1. Validate q_j_dist
+    if not isinstance(q_j_dist, list):
+        raise TypeError(f"q_j_dist must be a list. Got {type(q_j_dist)}.")
+    # C_total >= 0 is validated next. If C_total = 0, len(q_j_dist) should be 1.
+    # If C_total >= 0, then q_j_dist cannot be empty if len(q_j_dist) == C_total + 1.
+    
+    for i, q_val in enumerate(q_j_dist):
+        if not isinstance(q_val, (float, int)):
+            raise TypeError(f"All elements in q_j_dist must be float or int. Found type {type(q_val)} at index {i}.")
+        if q_val < 0: # Probabilities cannot be negative
+            raise ValueError(f"All elements in q_j_dist must be non-negative. Found {q_val} at index {i}.")
+    
+    if q_j_dist: # Only sum if not empty, though other checks should ensure it's not empty if C_total >=0
+        sum_q_j = sum(q_j_dist)
+        if abs(sum_q_j - 1.0) > 1e-6:
+            raise ValueError(f"q_j_dist must be normalized (sum of elements must be close to 1.0). Sum is {sum_q_j}.")
+    elif C_total >= 0 : # If C_total >=0, q_j_dist should not be empty.
+        raise ValueError("q_j_dist is empty but C_total >= 0, which implies q_j_dist should have C_total+1 elements.")
+
+
+    # 2. Validate C_total
+    if not isinstance(C_total, int):
+        raise TypeError(f"C_total must be an integer. Got {type(C_total)}.")
+    if C_total < 0:
+        raise ValueError(f"C_total must be non-negative. Got {C_total}.")
+    if len(q_j_dist) != C_total + 1:
+        raise ValueError(f"Length of q_j_dist ({len(q_j_dist)}) must be C_total + 1 ({C_total + 1}).")
+    # This also implies q_j_dist is not empty if C_total >= 0.
+
+    # 3. Validate Types of Lists for b_k and t_k
+    if not isinstance(b_k_new, list):
+        raise TypeError(f"b_k_new must be a list. Got {type(b_k_new)}.")
+    if not isinstance(b_k_ho, list):
+        raise TypeError(f"b_k_ho must be a list. Got {type(b_k_ho)}.")
+    if not isinstance(t_k_new, list):
+        raise TypeError(f"t_k_new must be a list. Got {type(t_k_new)}.")
+    if not isinstance(t_k_ho, list):
+        raise TypeError(f"t_k_ho must be a list. Got {type(t_k_ho)}.")
+
+    # 4. Validate Consistency of Length for b_k and t_k pairs
+    if len(b_k_new) != len(t_k_new):
+        raise ValueError(f"Length of b_k_new ({len(b_k_new)}) must match length of t_k_new ({len(t_k_new)}).")
+    if len(b_k_ho) != len(t_k_ho):
+        raise ValueError(f"Length of b_k_ho ({len(b_k_ho)}) must match length of t_k_ho ({len(t_k_ho)}).")
+
+    # Note: Detailed validation of elements within b_k_new, b_k_ho, t_k_new, t_k_ho
+    # (e.g., 0 < b_k <= C_total - t_k, and 0 <= t_k <= C_total)
+    # will be done during the calculation phase or could be added here if preferred.
+    # For now, focusing on the essential structural validations.
+    # The problem description for this step only asked for these "essential" validations.
+
+    # Adicionar validações detalhadas para elementos de b_k e t_k
+    # Validação de b_k_new
+    for i, b_val in enumerate(b_k_new):
+        if not isinstance(b_val, int):
+            raise TypeError(f"Elements in b_k_new must be integers. Found type {type(b_val)} at index {i}.")
+        if b_val <= 0: # b_k deve ser positivo
+            raise ValueError(f"Elements in b_k_new must be positive. Found {b_val} at index {i}.")
+        # Não podemos validar b_val <= C_total - t_k_new[i] aqui sem t_k_new[i],
+        # mas a lógica de bloqueio tratará casos onde b_val é muito grande.
+
+    # Validação de t_k_new
+    for i, t_val in enumerate(t_k_new):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_new must be integers. Found type {type(t_val)} at index {i}.")
+        if not (0 <= t_val <= C_total):
+             raise ValueError(f"Elements in t_k_new must satisfy 0 <= t_val <= C_total. Found t_k_new[{i}] = {t_val} with C_total = {C_total}.")
+    
+    # Validação de b_k_ho
+    for i, b_val in enumerate(b_k_ho):
+        if not isinstance(b_val, int):
+            raise TypeError(f"Elements in b_k_ho must be integers. Found type {type(b_val)} at index {i}.")
+        if b_val <= 0:
+            raise ValueError(f"Elements in b_k_ho must be positive. Found {b_val} at index {i}.")
+
+    # Validação de t_k_ho
+    for i, t_val in enumerate(t_k_ho):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_ho must be integers. Found type {type(t_val)} at index {i}.")
+        if not (0 <= t_val <= C_total):
+            raise ValueError(f"Elements in t_k_ho must satisfy 0 <= t_val <= C_total. Found t_k_ho[{i}] = {t_val} with C_total = {C_total}.")
+
+
+    P_B_new_list = []
+    # Blocking condition for class k: j_occupied + b_k > C_total - t_k
+    # This means blocking occurs if j_occupied > C_total - t_k - b_k.
+    # So, sum q(j) from floor(C_total - t_k - b_k) + 1 up to C_total.
+    # Let threshold = C_total - t_k - b_k. We sum for j > threshold.
+    # lower_sum_idx = floor(threshold) + 1.
+    # If threshold < 0 (i.e., C_total - t_k < b_k), it means call is blocked even if j=0. P_B = 1.
+    # In this case, lower_sum_idx will be <= 0. range(max(0, lower_sum_idx), C_total + 1) sums all q(j).
+    
+    for b_val, t_k_val in zip(b_k_new, t_k_new):
+        # Effective capacity for this class: C_eff = C_total - t_k_val
+        # Call is blocked if j_occupied + b_val > C_eff
+        # Or, j_occupied > C_eff - b_val
+        # Sum q(j) for j from floor(C_eff - b_val) + 1 to C_total
+        
+        # Check if b_val itself is compatible with the effective capacity C_total - t_k_val
+        if b_val > (C_total - t_k_val): # If channels needed > available channels after reservation
+            current_P_B = 1.0 # Always blocked
+        else:
+            lower_bound_j_exclusive = C_total - t_k_val - b_val
+            # We need to sum for j > lower_bound_j_exclusive
+            # So, j starts from floor(lower_bound_j_exclusive) + 1
+            # which is equivalent to (C_total - t_k_val - b_val) + 1, if integer, or floor+1
+            
+            # Simpler: sum q(j) where j + b_val > C_total - t_k_val
+            # The first j for which this is NOT blocked is when j + b_val <= C_total - t_k_val
+            # So, j_max_non_blocked = C_total - t_k_val - b_val
+            # Any j > j_max_non_blocked will be blocked.
+            # So, sum from j_max_non_blocked + 1 to C_total
+            
+            start_sum_idx = (C_total - t_k_val - b_val) + 1
+            current_P_B = 0.0
+            
+            # The loop should sum q(j) for j from max(0, start_sum_idx) to C_total
+            for j_idx in range(max(0, start_sum_idx), C_total + 1):
+                # Defensive check, though q_j_dist length is C_total + 1
+                if j_idx < len(q_j_dist): # Should always be true
+                    current_P_B += q_j_dist[j_idx]
+        P_B_new_list.append(current_P_B)
+
+    P_B_ho_list = []
+    # Logic is identical to P_B_new_list, but using b_k_ho and t_k_ho
+    for b_val, t_k_val in zip(b_k_ho, t_k_ho):
+        # Validations for b_val > 0 and 0 <= t_k_val <= C_total already done above.
+        
+        if b_val > (C_total - t_k_val): # If channels needed > available channels after reservation
+            current_P_B = 1.0 # Always blocked
+        else:
+            start_sum_idx = (C_total - t_k_val - b_val) + 1
+            current_P_B = 0.0
+            
+            for j_idx in range(max(0, start_sum_idx), C_total + 1):
+                if j_idx < len(q_j_dist): # Should always be true
+                    current_P_B += q_j_dist[j_idx]
+        P_B_ho_list.append(current_P_B)
+
+    return {'P_B_new': P_B_new_list, 'P_B_handover': P_B_ho_list}
 
 
 def calculate_qj_bpp_br(
