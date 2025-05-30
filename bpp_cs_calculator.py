@@ -1068,10 +1068,98 @@ def calculate_qj_bpp_br(
     Returns:
         q_j_dist: Normalized channel occupancy distribution q(j). (List[float]).
     """
-    # --- Validações de Entrada ---
-    # 1. Validate Types and Primitive Values (C_total, num_new_call_classes, num_ho_call_classes)
-    if not isinstance(C_total, int):
-        raise TypeError(f"C_total must be an integer. Got {type(C_total)}.")
+    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
+    # As validações de entrada existentes são mantidas antes deste bloco.
+    
+    # 1. Inicialização de q_j_dist
+    # Validações já garantem C_total >= 0
+    q_j_dist = [0.0] * (C_total + 1) 
+    q_j_dist[0] = 1.0
+    # Se C_total = 0, q_j_dist = [1.0]
+
+    # 2. Loop Recursivo Principal
+    # O loop DEVE sempre ir de 1 até C_total.
+    for j_iter in range(1, C_total + 1): # j_iter corresponde a 'j' no pseudocódigo
+        total_contribution_for_j = 0.0
+
+        # Loop para classes de NOVAS CHAMADAS
+        for k_idx in range(num_new_call_classes):
+            current_alpha_new = float(alpha_k_new[k_idx])
+            current_b_new = b_k_new[k_idx]
+            current_B_dist_new = B_cl_minus_1_new[k_idx]
+            current_t_k_new = t_k_new[k_idx]
+
+            # A condição IF decide se a classe contribui
+            if j_iter <= (C_total - current_t_k_new):
+                if current_alpha_new == 0.0:
+                    continue # Pula para a próxima classe se alpha é zero
+
+                max_l_new = floor(j_iter / current_b_new)
+                if max_l_new < 1:
+                    continue # Pula se nenhum lote puder compor j_iter
+
+                soma_interna_new = 0.0
+                for l_val in range(1, max_l_new + 1): # l_val corresponde a 'z' no pseudocódigo
+                    B_list_idx = l_val - 1
+                    B_prob_ge_l_new = 0.0
+                    if B_list_idx < len(current_B_dist_new):
+                        B_prob_ge_l_new = float(current_B_dist_new[B_list_idx])
+                    
+                    q_term_idx = j_iter - l_val * current_b_new
+                    # q_term_idx >= 0 é garantido por max_l_new
+                    # A validação q_term_idx < len(q_j_dist) também deve ser verdadeira
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
+                
+                total_contribution_for_j += current_alpha_new * current_b_new * soma_interna_new
+
+        # Loop para classes de CHAMADAS DE HANDOVER
+        for k_idx in range(num_ho_call_classes):
+            current_alpha_ho = float(alpha_k_ho[k_idx])
+            current_b_ho = b_k_ho[k_idx]
+            current_B_dist_ho = B_cl_minus_1_ho[k_idx]
+            current_t_k_ho = t_k_ho[k_idx]
+
+            # A mesma lógica condicional aqui
+            if j_iter <= (C_total - current_t_k_ho):
+                if current_alpha_ho == 0.0:
+                    continue
+
+                max_l_ho = floor(j_iter / current_b_ho)
+                if max_l_ho < 1:
+                    continue
+
+                soma_interna_ho = 0.0
+                for l_val in range(1, max_l_ho + 1): # l_val corresponde a 'z'
+                    B_list_idx = l_val - 1
+                    B_prob_ge_l_ho = 0.0
+                    if B_list_idx < len(current_B_dist_ho):
+                        B_prob_ge_l_ho = float(current_B_dist_ho[B_list_idx])
+
+                    q_term_idx = j_iter - l_val * current_b_ho
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
+                
+                total_contribution_for_j += current_alpha_ho * current_b_ho * soma_interna_ho
+
+        # Fim dos loops de classes
+        if j_iter > 0: # Sempre verdade neste loop
+            q_j_dist[j_iter] = total_contribution_for_j / j_iter
+
+    # 3. Normalização
+    # Deve ser feita APÓS o loop principal estar completo.
+    soma_total_q = sum(q_j_dist)
+    if soma_total_q > 1e-9: # Usar uma pequena épsilon para comparação de ponto flutuante
+        q_j_dist_normalizado = [val / soma_total_q for val in q_j_dist]
+    else:
+        # Este caso não deve ser alcançado se q_j_dist[0]=1.0 e C_total >= 0
+        # e pelo menos alguma carga for diferente de zero com t_k permissivos.
+        # Se todas as cargas forem zero, ou todos t_k forem muito restritivos,
+        # q_j_dist será [1.0, 0, 0, ...], e soma_total_q = 1.0.
+        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}). q_j_dist={q_j_dist}")
+
+    return q_j_dist_normalizado
+    # --- FIM DA LÓGICA DE CÁLCULO ---
     if C_total < 0:
         raise ValueError(f"C_total must be non-negative. Got {C_total}.")
 
@@ -1179,98 +1267,94 @@ def calculate_qj_bpp_br(
         if not (0 <= t_val <= C_total): # Same logic as for t_k_new
             raise ValueError(f"Elements in t_k_ho must satisfy 0 <= t_val <= C_total. Found t_k_ho[{k}] = {t_val} with C_total = {C_total}.")
             
-    # 1. Inicialização de q_j_dist
-    q_j_dist = [0.0] * (C_total + 1)
-    if C_total >= 0 : # Should always be true due to validation
+    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
+    # 1. Inicialização
+    q_j_dist = [0.0] * (C_total + 1) # Usar q_j_dist como nome da variável
+    if C_total >= 0: # Validação já garante C_total >= 0
         q_j_dist[0] = 1.0
-    elif C_total == -1 and not q_j_dist : # Path for C_total = -1 if it was allowed (it's not)
-        return [] # Should have been caught by C_total validation
+    # Se C_total = -1 (impossível devido à validação), q_j_dist seria lista vazia ou erro.
+    # Se C_total = 0, q_j_dist = [1.0]
 
-    # 2. Loop de Recursão Principal
-    for j_iter in range(1, C_total + 1): # j_iter is the 'j' in q(j)
-        sum_total_weighted_q = 0.0
+    # 2. Loop Recursivo Principal
+    # O loop DEVE sempre ir de 1 até C_total.
+    for j_iter in range(1, C_total + 1): # j_iter corresponde a 'j' no pseudocódigo
+        total_contribution_for_j = 0.0
 
-        # Loop para Novas Chamadas (k_idx)
+        # Loop para classes de NOVAS CHAMADAS
         for k_idx in range(num_new_call_classes):
-            alpha_val = float(alpha_k_new[k_idx])
-            b_val = b_k_new[k_idx]
-            B_dist = B_cl_minus_1_new[k_idx]
-            t_k_val = t_k_new[k_idx]
+            current_alpha_new = float(alpha_k_new[k_idx])
+            current_b_new = b_k_new[k_idx]
+            current_B_dist_new = B_cl_minus_1_new[k_idx]
+            current_t_k_new = t_k_new[k_idx]
 
-            # Condição de Admissão para Trunk Reservation:
-            # A classe k é admitida se o estado resultante j_iter for tal que j_iter <= C_total - t_k_val
-            # t_k_val é o número de canais reservados PARA OUTRAS classes de maior prioridade.
-            # Se t_k_val = 0, a classe pode usar até C_total (j_iter <= C_total).
-            if j_iter <= (C_total - t_k_val):
-                if alpha_val == 0.0:
-                    continue
+            # A condição IF decide se a classe contribui, mas NÃO para o loop principal.
+            if j_iter <= (C_total - current_t_k_new):
+                if current_alpha_new == 0.0:
+                    continue # Pula para a próxima classe se alpha é zero
 
-                max_l = floor(j_iter / b_val)
-                if max_l < 1:
-                    continue
+                max_l_new = floor(j_iter / current_b_new)
+                if max_l_new < 1:
+                    continue # Pula se nenhum lote puder compor j_iter
 
-                inner_sum = 0.0
-                for l_iter in range(1, max_l + 1):
-                    B_idx = l_iter - 1
-                    B_prob = 0.0
-                    if B_idx < len(B_dist):
-                        B_prob = float(B_dist[B_idx])
+                soma_interna_new = 0.0
+                for l_val in range(1, max_l_new + 1): # l_val corresponde a 'z' no pseudocódigo
+                    B_list_idx = l_val - 1
+                    B_prob_ge_l_new = 0.0
+                    if B_list_idx < len(current_B_dist_new):
+                        B_prob_ge_l_new = float(current_B_dist_new[B_list_idx])
                     
-                    q_idx = j_iter - l_iter * b_val
-                    # q_idx is guaranteed non-negative due to max_l definition
-                    if q_idx < len(q_j_dist): # Defensive, should be true
-                        inner_sum += q_j_dist[q_idx] * B_prob
+                    q_term_idx = j_iter - l_val * current_b_new
+                    # q_term_idx >= 0 é garantido por max_l_new
+                    if q_term_idx < len(q_j_dist): # Verificação defensiva
+                        soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
                 
-                sum_total_weighted_q += alpha_val * b_val * inner_sum
+                total_contribution_for_j += current_alpha_new * current_b_new * soma_interna_new
 
-        # Loop para Chamadas de Handover (k_idx)
+        # Loop para classes de CHAMADAS DE HANDOVER
         for k_idx in range(num_ho_call_classes):
-            alpha_val = float(alpha_k_ho[k_idx])
-            b_val = b_k_ho[k_idx]
-            B_dist = B_cl_minus_1_ho[k_idx]
-            t_k_val = t_k_ho[k_idx]
+            current_alpha_ho = float(alpha_k_ho[k_idx])
+            current_b_ho = b_k_ho[k_idx]
+            current_B_dist_ho = B_cl_minus_1_ho[k_idx]
+            current_t_k_ho = t_k_ho[k_idx]
 
-            # Condição de Admissão para Trunk Reservation
-            if j_iter <= (C_total - t_k_val):
-                if alpha_val == 0.0:
+            # A mesma lógica condicional aqui
+            if j_iter <= (C_total - current_t_k_ho):
+                if current_alpha_ho == 0.0:
                     continue
 
-                max_l = floor(j_iter / b_val)
-                if max_l < 1:
+                max_l_ho = floor(j_iter / current_b_ho)
+                if max_l_ho < 1:
                     continue
 
-                inner_sum_ho = 0.0
-                for l_iter in range(1, max_l + 1):
-                    B_idx = l_iter - 1
-                    B_prob = 0.0
-                    if B_idx < len(B_dist):
-                        B_prob = float(B_dist[B_idx])
-                    
-                    q_idx = j_iter - l_iter * b_val
-                    if q_idx < len(q_j_dist): # Defensive
-                        inner_sum_ho += q_j_dist[q_idx] * B_prob
+                soma_interna_ho = 0.0
+                for l_val in range(1, max_l_ho + 1): # l_val corresponde a 'z'
+                    B_list_idx = l_val - 1
+                    B_prob_ge_l_ho = 0.0
+                    if B_list_idx < len(current_B_dist_ho):
+                        B_prob_ge_l_ho = float(current_B_dist_ho[B_list_idx])
+
+                    q_term_idx = j_iter - l_val * current_b_ho
+                    if q_term_idx < len(q_j_dist): # Verificação defensiva
+                        soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
                 
-                sum_total_weighted_q += alpha_val * b_val * inner_sum_ho
-        
-        if j_iter > 0: # Always true in this loop
-            q_j_dist[j_iter] = sum_total_weighted_q / j_iter
+                total_contribution_for_j += current_alpha_ho * current_b_ho * soma_interna_ho
+
+        # Fim dos loops de classes
+        if j_iter > 0: # Sempre verdade neste loop
+            q_j_dist[j_iter] = total_contribution_for_j / j_iter
 
     # 3. Normalização
-    total_sum = sum(q_j_dist)
-    if total_sum > 1e-9:
-        q_j_dist = [val / total_sum for val in q_j_dist]
+    # Deve ser feita APÓS o loop principal estar completo.
+    soma_total_q = sum(q_j_dist)
+    q_j_dist_normalizado: List[float]
+    if soma_total_q > 1e-9: # Usar uma pequena épsilon para comparação de ponto flutuante
+        q_j_dist_normalizado = [val / soma_total_q for val in q_j_dist]
     else:
-        # This case implies q_j_dist[0] was not 1.0 or became non-positive,
-        # or all other q_j_dist values are excessively negative, which is unexpected.
-        # If C_total = 0, q_j_dist = [1.0], sum = 1.0, so this path not taken.
-        # If all traffic is zero, q_j_dist = [1.0, 0,...], sum = 1.0, not taken.
-        raise RuntimeError(
-            f"Normalization failed for BR policy (new t_k interpretation): total_sum is not positive ({total_sum}). "
-            f"q_j_dist (unnormalized): {q_j_dist}"
-        )
+        # Este caso não deve ser alcançado se q_j_dist[0]=1.0 e C_total >= 0
+        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}).")
 
-    # 4. Retorno
-    return q_j_dist
+    return q_j_dist_normalizado
+    # --- FIM DA LÓGICA DE CÁLCULO ---
     C_total_val_fail = 2
     q_j_dist_val_fail = [0.2, 0.3, 0.5] # Soma = 1.0
     b_k_new_val_fail = [1, 3] # b_k=3 > C_total_val_fail=2
