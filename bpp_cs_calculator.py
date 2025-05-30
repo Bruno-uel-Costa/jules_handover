@@ -651,62 +651,13 @@ if __name__ == "__main__":
         
         qj_match = diff_sum_qj < 1e-9
         if qj_match:
-            print("  SUCESSO: Distribuições BR (t_k=0) e CS são idênticas.")
-            
-            print("\n  --- Comparando Probabilidades de Bloqueio (BR com t_k=0 vs CS) ---")
-            pb_br_params = {
-                "C_total": br_params_comp["C_total"],
-                "q_j_dist": q_br_comp,
-                "b_k_new": br_params_comp["b_k_new"],
-                "b_k_ho": br_params_comp["b_k_ho"],
-                "t_k_new": br_params_comp["t_k_new"], # Lista de zeros
-                "t_k_ho": br_params_comp["t_k_ho"]  # Lista de zeros
-            }
-            pb_br_results = calculate_blocking_probabilities_br(**pb_br_params)
-            
-            pb_cs_params = {
-                "C_total": cs_example_params_for_comp["C_total"],
-                "q_j_dist": q_cs_comp,
-                "b_k_new": cs_example_params_for_comp["b_k_new"],
-                "b_k_ho": cs_example_params_for_comp["b_k_ho"]
-            }
-            pb_cs_results_dict = calculate_blocking_probabilities_cs(**pb_cs_params)
-            # Adaptar chaves do pb_cs_results_dict para corresponder às de pb_br_results para comparação
-            pb_cs_results_adapted = {
-                'P_B_new': pb_cs_results_dict.get('C_bk_new', []), # Em CS, C_bk = P_B
-                'P_B_handover': pb_cs_results_dict.get('C_bk_ho', [])
-            }
-
-            print(f"    Resultados de Probabilidade de Bloqueio (BR com t_k=0):")
-            for key, value in pb_br_results.items():
-                print(f"      {key}: {[f'{v:.6f}' for v in value]}")
-            
-            print(f"    Resultados de Probabilidade de Bloqueio (CS):")
-            for key, value in pb_cs_results_adapted.items():
-                 print(f"      {key}: {[f'{v:.6f}' for v in value]}")
-
-            # Comparar os dicionários
-            pb_match = True
-            if len(pb_br_results['P_B_new']) != len(pb_cs_results_adapted['P_B_new']) or \
-               len(pb_br_results['P_B_handover']) != len(pb_cs_results_adapted['P_B_handover']):
-                pb_match = False
-            else:
-                for i in range(len(pb_br_results['P_B_new'])):
-                    if abs(pb_br_results['P_B_new'][i] - pb_cs_results_adapted['P_B_new'][i]) > 1e-9:
-                        pb_match = False
-                        break
-                if pb_match:
-                    for i in range(len(pb_br_results['P_B_handover'])):
-                        if abs(pb_br_results['P_B_handover'][i] - pb_cs_results_adapted['P_B_handover'][i]) > 1e-9:
-                            pb_match = False
-                            break
-            
-            if pb_match:
-                print("    SUCESSO: Probabilidades de Bloqueio BR (t_k=0) e CS são idênticas.")
-            else:
-                print("    FALHA: Probabilidades de Bloqueio BR (t_k=0) e CS diferem.")
+            print("  SUCESSO: Distribuições q(j) BR (t_k=0) e CS são idênticas.")
+            # A sub-seção de comparação de probabilidades de bloqueio que usava a assinatura antiga
+            # de calculate_blocking_probabilities_br foi removida, pois essa função foi
+            # redefinida para a política de Guard Channel e não aceita mais b_k/t_k por classe.
+            # O "NOVO TESTE" mais abaixo demonstra a nova calculate_blocking_probabilities_br.
         else:
-            print("  FALHA: Distribuições q(j) BR (t_k=0) e CS diferem, P_B não será comparado.")
+            print("  FALHA: Distribuições q(j) BR (t_k=0) e CS diferem.")
             
     except Exception as e:
         print(f"  Erro durante o teste de comparação: {e}")
@@ -750,20 +701,9 @@ if __name__ == "__main__":
                 print(f"    VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
             else:
                 print(f"    NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
-
-        print(f"\n  --- Testando calculate_blocking_probabilities_br com saída de 'Teste BR com Reservas Ativas' ---")
-        pb_br_active_params = {
-            "C_total": params_br_active["C_total"],
-            "q_j_dist": q_br_active,
-            "b_k_new": params_br_active["b_k_new"],
-            "b_k_ho": params_br_active["b_k_ho"],
-            "t_k_new": params_br_active["t_k_new"],
-            "t_k_ho": params_br_active["t_k_ho"]
-        }
-        pb_br_active_results = calculate_blocking_probabilities_br(**pb_br_active_params)
-        print(f"  Resultados de Probabilidade de Bloqueio (BR com t_k > 0):")
-        for key, value in pb_br_active_results.items():
-            print(f"    {key}: {[f'{v:.6f}' for v in value]}")
+        
+        # A chamada a calculate_blocking_probabilities_br com a assinatura antiga foi removida.
+        # O "NOVO TESTE" mais abaixo demonstra a nova calculate_blocking_probabilities_br com C_g.
 
     except Exception as e:
         print(f"  Erro durante o teste BR com reservas ativas: {e}")
