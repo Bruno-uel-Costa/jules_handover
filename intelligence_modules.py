@@ -57,6 +57,83 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
+# +-------------------------------------------------------------------------------------+
+# | SimpleGuardChannelEnv for testing RL agent learning                               |
+# +-------------------------------------------------------------------------------------+
+class SimpleGuardChannelEnv:
+    def __init__(self, max_gc=5, max_traffic=10.0, max_steps_per_episode=50):
+        self.N_GC_min = 0
+        self.N_GC_max = int(max_gc)
+        self.max_traffic = float(max_traffic)
+
+        # State: [current_N_GC_normalized, current_traffic_normalized]
+        self.state_dim = 2
+        # Action: Delta_NGC -> maps to -1, 0, +1
+        self.action_dim = 3
+
+        self.current_N_GC = 0
+        self.current_traffic_level = 0.0 # Actual traffic level
+
+        self.current_step = 0
+        self.max_steps_per_episode = int(max_steps_per_episode)
+
+        # Action mapping: 0 -> -1, 1 -> 0, 2 -> +1 GC change
+        self.action_to_delta_gc = {0: -1, 1: 0, 2: 1}
+
+    def _normalize_state(self):
+        # Normalize N_GC to [0, 1]
+        norm_gc = self.current_N_GC / self.N_GC_max if self.N_GC_max > 0 else 0.0
+        # Normalize traffic to [0, 1]
+        norm_traffic = self.current_traffic_level / self.max_traffic if self.max_traffic > 0 else 0.0
+        return np.array([norm_gc, norm_traffic], dtype=np.float32)
+
+    def reset(self):
+        # Initial N_GC can be halfway or random within a range
+        self.current_N_GC = self.N_GC_max // 2
+        # Initial traffic level can be random
+        self.current_traffic_level = np.random.uniform(0, self.max_traffic * 0.75) # Start with moderate traffic
+        self.current_step = 0
+        return self._normalize_state()
+
+    def step(self, action_idx):
+        if not isinstance(action_idx, int):
+            # If action_idx is a tensor or numpy int, convert to Python int
+            action_idx = int(action_idx)
+
+        if action_idx not in self.action_to_delta_gc:
+            raise ValueError(f"Invalid action_idx: {action_idx}. Must be in {list(self.action_to_delta_gc.keys())}")
+
+        delta_N_GC = self.action_to_delta_gc[action_idx]
+        self.current_N_GC = np.clip(self.current_N_GC + delta_N_GC, self.N_GC_min, self.N_GC_max)
+
+        # Reward logic:
+        # Ideal N_GC is proportional to traffic.
+        if self.max_traffic > 0 and self.N_GC_max > 0:
+            # Target N_GC aims to be a fraction of N_GC_max, scaled by traffic intensity
+            target_N_GC = round((self.current_traffic_level / self.max_traffic) * self.N_GC_max)
+        else:
+            target_N_GC = 0
+
+        reward = -abs(self.current_N_GC - target_N_GC) # Primary reward: closeness to target
+        reward -= 0.05 * (self.current_N_GC / self.N_GC_max if self.N_GC_max > 0 else 0) # Small penalty for N_GC usage
+
+        if self.current_N_GC == target_N_GC:
+            reward += 0.5 # Bonus for being at target
+
+        # Simulate traffic change for next state
+        # Traffic can fluctuate, e.g., small random walk
+        traffic_change_factor = np.random.uniform(-0.15, 0.15) # Traffic changes by up to 15% of max_traffic
+        self.current_traffic_level = np.clip(self.current_traffic_level + (traffic_change_factor * self.max_traffic),
+                                             0, self.max_traffic)
+
+        self.current_step += 1
+        done = self.current_step >= self.max_steps_per_episode
+
+        next_state_normalized = self._normalize_state()
+        info = {} # Placeholder for additional info
+
+        return next_state_normalized, float(reward), bool(done), info
+
 class ActorCriticAgent(nn.Module):
     def __init__(self, state_dim, action_dim,
                  gamma=0.99, gae_lambda=0.95, entropy_coefficient=0.01,
@@ -212,67 +289,138 @@ def calculate_reward(P_B: float, P_F: float, U_nonGC: float, N_GC: int) -> float
     return reward
 
 if __name__ == "__main__":
-    state_dim_g = 5
-    action_dim_g = 3
-    device_g = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device_g}")
+    # --- 1. Configurações ---
+    run_on_gpu_if_available = True
+    num_episodes_train = 300  # Number of episodes for the learning test (was 500, 300 for faster test)
+    max_steps_per_episode_env = 50
+    log_interval_train = 50
 
-    agent_g = ActorCriticAgent(state_dim_g, action_dim_g, actor_lr=1e-4, critic_lr=3e-4, entropy_coefficient=0.005)
-    agent_g.to(device_g)
-    print("ActorCriticAgent instantiated.")
+    # Agent Hyperparameters (example values, can be tuned)
+    config_gamma = 0.98
+    config_gae_lambda = 0.90
+    config_entropy_coefficient = 0.01
+    config_actor_lr = 5e-4
+    config_critic_lr = 1e-3
 
-    # Initial mode for select_action/evaluate_state tests
-    agent_g.actor.eval()
-    agent_g.critic.eval()
-
-    dummy_state_list_g = np.random.rand(state_dim_g).tolist()
-    print(f"
-Dummy state (list): {dummy_state_list_g}")
-
-    # select_action returns action_item (int) and log_prob (tensor)
-    action_g, log_prob_tensor_g = agent_g.select_action(dummy_state_list_g, device=device_g)
-    print(f"Selected Action: {action_g}, Log Probability: {log_prob_tensor_g.item()}")
-
-    state_value_tensor_g = agent_g.evaluate_state(dummy_state_list_g, device=device_g)
-    print(f"Estimated State Value: {state_value_tensor_g.item()}")
-
-    print("
---- Testing Learning Logic ---")
-    num_dummy_steps_g = 10 # Collect a small trajectory
-
-    for i in range(num_dummy_steps_g):
-        current_state_g = np.random.rand(state_dim_g).tolist()
-        # select_action needs eval mode if it's not managed inside.
-        # agent_g.actor.eval() # already in eval from above
-        act_g, lp_tensor_g = agent_g.select_action(current_state_g, device=device_g)
-
-        next_st_g = np.random.rand(state_dim_g).tolist()
-        rew_g = np.random.uniform(-1, 1) # More realistic reward range
-        # Make 'done' true for the last step to test terminal condition handling in GAE
-        dn_g = True if i == num_dummy_steps_g - 1 else False
-
-        agent_g.store_experience(current_state_g, act_g, rew_g, next_st_g, dn_g, lp_tensor_g)
-
-    if agent_g.trajectory_states:
-        print(f"
-Collected {len(agent_g.trajectory_states)} experiences. Attempting to learn...")
-        # learn method handles train/eval mode switching internally
-        actor_loss_g, critic_loss_g = agent_g.learn(device=device_g)
-        if actor_loss_g is not None and critic_loss_g is not None:
-            print(f"Learning completed. Actor Loss: {actor_loss_g:.4f}, Critic Loss: {critic_loss_g:.4f}")
-        else:
-            print("Learning did not run (e.g. no experiences).")
+    if run_on_gpu_if_available and torch.cuda.is_available():
+        device = torch.device("cuda")
     else:
-        print("No experiences collected, skipping learn test.")
+        device = torch.device("cpu")
 
-    # agent.learn() sets mode to eval at the end.
+    print(f"--- Teste de Aprendizado do Agente RL (Execução Direta) ---")
+    print(f"Usando dispositivo: {device}")
+
+    # --- 2. Inicializar Ambiente e Agente ---
+    env = SimpleGuardChannelEnv(max_gc=5, max_traffic=10, max_steps_per_episode=max_steps_per_episode_env)
+    state_dim = env.state_dim
+    action_dim = env.action_dim
+
+    agent = ActorCriticAgent(
+        state_dim,
+        action_dim,
+        gamma=config_gamma,
+        gae_lambda=config_gae_lambda,
+        entropy_coefficient=config_entropy_coefficient,
+        actor_lr=config_actor_lr,
+        critic_lr=config_critic_lr
+    )
+    agent.to(device) # Move agent's networks to the selected device
+
+    print(f"Ambiente Simples: state_dim={state_dim}, action_dim={action_dim}")
+    print(f"Agente ActorCritic instanciado com: gamma={config_gamma}, actor_lr={config_actor_lr}, critic_lr={config_critic_lr}")
+
+    # --- 3. Loop de Treinamento e Avaliação ---
+    all_episode_rewards = []
+    avg_rewards_history = [] # Stores average rewards for period defined by log_interval_train
+
+    print(f"
+Iniciando loop de treinamento para {num_episodes_train} episódios...")
+    for episode in range(num_episodes_train):
+        state_np = env.reset() # Returns a NumPy array
+        current_episode_reward = 0.0
+
+        # Set agent to evaluation mode for action selection during experience collection
+        agent.actor.eval()
+        agent.critic.eval()
+
+        for step_num in range(env.max_steps_per_episode):
+            # state_np is a NumPy array, select_action can handle it
+            action, log_prob_tensor = agent.select_action(state_np, device=device)
+
+            next_state_np, reward, done, _ = env.step(action) # env.step also returns NumPy array for state
+
+            # store_experience expects state and next_state as NumPy arrays or Python lists.
+            # log_prob_tensor is already a tensor.
+            agent.store_experience(state_np, action, reward, next_state_np, done, log_prob_tensor)
+
+            state_np = next_state_np
+            current_episode_reward += reward
+
+            if done:
+                break
+
+        all_episode_rewards.append(current_episode_reward)
+
+        # Call learn() after each episode if experiences were collected
+        # The learn() method handles its own train/eval mode switching internally.
+        if agent.trajectory_states: # Check if there's anything to learn from
+            actor_loss_val, critic_loss_val = agent.learn(device=device)
+        else:
+            actor_loss_val, critic_loss_val = None, None # No learning if no trajectory
+
+        if (episode + 1) % log_interval_train == 0:
+            # Calculate average reward for the last 'log_interval_train' episodes
+            avg_r = np.mean(all_episode_rewards[-log_interval_train:])
+            avg_rewards_history.append(avg_r)
+            print(f"Episódio {episode+1}/{num_episodes_train}, Recompensa Média (últ. {log_interval_train}): {avg_r:.2f}", end="")
+            if actor_loss_val is not None:
+                print(f", Perda Ator: {actor_loss_val:.4f}, Perda Crítico: {critic_loss_val:.4f}")
+            else:
+                print(" (Nenhuma aprendizagem nesta etapa pois não havia trajetória)")
 
     print("
-Testing calculate_reward...")
-    P_B_sample_g, P_F_sample_g, U_nonGC_sample_g, N_GC_sample_g = 0.05, 0.01, 0.7, 2
-    reward_val_g = calculate_reward(P_B_sample_g, P_F_sample_g, U_nonGC_sample_g, N_GC_sample_g)
-    expected_reward_g = -(W_B * P_B_sample_g) - (W_F * P_F_sample_g) + (W_U_NON_GC * U_nonGC_sample_g) - (W_N_GC * N_GC_sample_g)
-    print(f"Calculated Reward: {reward_val_g}, Expected: {expected_reward_g}")
+--- Treinamento/Teste de Aprendizado Concluído ---")
+
+    # --- 4. Verificação de Aprendizado ---
+    if len(avg_rewards_history) >= 2: # Need at least two periods to compare
+        initial_avg_reward = avg_rewards_history[0]
+        final_avg_reward = avg_rewards_history[-1]
+        print(f"Recompensa média do primeiro período ({log_interval_train} eps): {initial_avg_reward:.2f}")
+        print(f"Recompensa média do último período ({log_interval_train} eps): {final_avg_reward:.2f}")
+
+        # A simple check for improvement
+        if final_avg_reward > initial_avg_reward + 0.1: # Expect at least a small improvement
+            print("VERIFICAÇÃO: Agente demonstrou melhora na recompensa média.")
+        else:
+            print("AVISO: Agente NÃO demonstrou melhora significativa na recompensa média durante este teste.")
+    elif num_episodes_train > 0 and len(all_episode_rewards) > 0:
+         print(f"Treinamento com número de episódios ({num_episodes_train}) ou log_interval ({log_interval_train}) "
+               f"insuficiente para comparar múltiplos períodos de recompensa média robustamente.")
+         print(f"Recompensa média geral em todos os episódios: {np.mean(all_episode_rewards):.2f}")
+    else:
+        print("Nenhum dado de recompensa foi coletado durante o treinamento.")
+
+    # --- 5. Teste da Função de Recompensa (mantido do original) ---
+    print("
+--- Testando calculate_reward ---")
+    # W_B, W_F, W_U_NON_GC, W_N_GC are assumed to be global constants defined at the top of the file.
+
+    P_B_sample = 0.05
+    P_F_sample = 0.01
+    U_nonGC_sample = 0.7
+    N_GC_sample = 2
+
+    reward_val = calculate_reward(P_B_sample, P_F_sample, U_nonGC_sample, N_GC_sample)
+
+    expected_reward = -(W_B * P_B_sample) - (W_F * P_F_sample) +                       (W_U_NON_GC * U_nonGC_sample) - (W_N_GC * N_GC_sample)
+
+    print(f"P_B={P_B_sample}, P_F={P_F_sample}, U_nonGC={U_nonGC_sample}, N_GC={N_GC_sample}")
+    print(f"Recompensa Calculada: {reward_val:.4f}")
+    print(f"Recompensa Esperada: {expected_reward:.4f}")
+    if abs(reward_val - expected_reward) < 1e-5:
+        print("Teste calculate_reward: SUCESSO")
+    else:
+        print("Teste calculate_reward: FALHOU")
 
     print("
-Test block finished.")
+--- Bloco de Teste Principal Concluído ---")
