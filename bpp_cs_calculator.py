@@ -1,3 +1,4 @@
+import numpy as np # Added import
 from math import floor
 from typing import List # Keep only one set of these imports
 
@@ -1068,9 +1069,112 @@ def calculate_qj_bpp_br(
     Returns:
         q_j_dist: Normalized channel occupancy distribution q(j). (List[float]).
     """
-    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
-    # As validações de entrada existentes são mantidas antes deste bloco.
+    # --- Validações de Entrada ---
+    # 1. Validate Types and Primitive Values (C_total, num_new_call_classes, num_ho_call_classes)
+    if not isinstance(C_total, int):
+        raise TypeError(f"C_total must be an integer. Got {type(C_total)}.")
+    if C_total < 0:
+        raise ValueError(f"C_total must be non-negative. Got {C_total}.")
+
+    if not isinstance(num_new_call_classes, int):
+        raise TypeError(f"num_new_call_classes must be an integer. Got {type(num_new_call_classes)}.")
+    if num_new_call_classes < 0:
+        raise ValueError(f"num_new_call_classes must be non-negative. Got {num_new_call_classes}.")
+
+    if not isinstance(num_ho_call_classes, int):
+        raise TypeError(f"num_ho_call_classes must be an integer. Got {type(num_ho_call_classes)}.")
+    if num_ho_call_classes < 0:
+        raise ValueError(f"num_ho_call_classes must be non-negative. Got {num_ho_call_classes}.")
+
+    # 2. Consistency and Content for New Call Lists (alpha_k_new, b_k_new, B_cl_minus_1_new, t_k_new)
+    if not isinstance(alpha_k_new, list):
+        raise TypeError(f"alpha_k_new must be a list. Got {type(alpha_k_new)}.")
+    if len(alpha_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of alpha_k_new ({len(alpha_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, val in enumerate(alpha_k_new):
+        if not isinstance(val, (float, int)):
+            raise TypeError(f"Elements in alpha_k_new must be float or int. Found type {type(val)} at index {k}.")
+        if val < 0:
+            raise ValueError(f"Elements in alpha_k_new must be non-negative. Found {val} at index {k}.")
+
+    if not isinstance(b_k_new, list):
+        raise TypeError(f"b_k_new must be a list. Got {type(b_k_new)}.")
+    if len(b_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of b_k_new ({len(b_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, val in enumerate(b_k_new):
+        if not isinstance(val, int):
+            raise TypeError(f"Elements in b_k_new must be integers. Found type {type(val)} at index {k}.")
+        if val <= 0:
+            raise ValueError(f"Elements in b_k_new must be positive. Found {val} at index {k}.")
+
+    if not isinstance(B_cl_minus_1_new, list):
+        raise TypeError(f"B_cl_minus_1_new must be a list. Got {type(B_cl_minus_1_new)}.")
+    if len(B_cl_minus_1_new) != num_new_call_classes:
+        raise ValueError(f"Length of B_cl_minus_1_new ({len(B_cl_minus_1_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, sub_list in enumerate(B_cl_minus_1_new):
+        if not isinstance(sub_list, list):
+            raise TypeError(f"Elements of B_cl_minus_1_new must be lists. Found type {type(sub_list)} at index {k}.")
+        for l_idx, val in enumerate(sub_list):
+            if not isinstance(val, (float, int)):
+                raise TypeError(f"Elements in B_cl_minus_1_new[{k}] must be float or int. Found type {type(val)} at index {l_idx}.")
+            if val < 0:
+                raise ValueError(f"Elements in B_cl_minus_1_new[{k}] must be non-negative. Found {val} at index {l_idx}.")
+
+    if not isinstance(t_k_new, list):
+        raise TypeError(f"t_k_new must be a list. Got {type(t_k_new)}.")
+    if len(t_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of t_k_new ({len(t_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, t_val in enumerate(t_k_new):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_new must be integers. Found type {type(t_val)} at index {k}.")
+        if not (0 <= t_val <= C_total):
+            raise ValueError(f"Elements in t_k_new must satisfy 0 <= t_val <= C_total. Found t_k_new[{k}] = {t_val} with C_total = {C_total}.")
+
+    # 3. Consistency and Content for Handover Call Lists (alpha_k_ho, b_k_ho, B_cl_minus_1_ho, t_k_ho)
+    if not isinstance(alpha_k_ho, list):
+        raise TypeError(f"alpha_k_ho must be a list. Got {type(alpha_k_ho)}.")
+    if len(alpha_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of alpha_k_ho ({len(alpha_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, val in enumerate(alpha_k_ho):
+        if not isinstance(val, (float, int)):
+            raise TypeError(f"Elements in alpha_k_ho must be float or int. Found type {type(val)} at index {k}.")
+        if val < 0:
+            raise ValueError(f"Elements in alpha_k_ho must be non-negative. Found {val} at index {k}.")
     
+    if not isinstance(b_k_ho, list):
+        raise TypeError(f"b_k_ho must be a list. Got {type(b_k_ho)}.")
+    if len(b_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of b_k_ho ({len(b_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, val in enumerate(b_k_ho):
+        if not isinstance(val, int):
+            raise TypeError(f"Elements in b_k_ho must be integers. Found type {type(val)} at index {k}.")
+        if val <= 0:
+            raise ValueError(f"Elements in b_k_ho must be positive. Found {val} at index {k}.")
+
+    if not isinstance(B_cl_minus_1_ho, list):
+        raise TypeError(f"B_cl_minus_1_ho must be a list. Got {type(B_cl_minus_1_ho)}.")
+    if len(B_cl_minus_1_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of B_cl_minus_1_ho ({len(B_cl_minus_1_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, sub_list in enumerate(B_cl_minus_1_ho):
+        if not isinstance(sub_list, list):
+            raise TypeError(f"Elements of B_cl_minus_1_ho must be lists. Found type {type(sub_list)} at index {k}.")
+        for l_idx, val in enumerate(sub_list):
+            if not isinstance(val, (float, int)):
+                raise TypeError(f"Elements in B_cl_minus_1_ho[{k}] must be float or int. Found type {type(val)} at index {l_idx}.")
+            if val < 0:
+                raise ValueError(f"Elements in B_cl_minus_1_ho[{k}] must be non-negative. Found {val} at index {l_idx}.")
+
+    if not isinstance(t_k_ho, list):
+        raise TypeError(f"t_k_ho must be a list. Got {type(t_k_ho)}.")
+    if len(t_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of t_k_ho ({len(t_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, t_val in enumerate(t_k_ho):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_ho must be integers. Found type {type(t_val)} at index {k}.")
+        if not (0 <= t_val <= C_total): 
+            raise ValueError(f"Elements in t_k_ho must satisfy 0 <= t_val <= C_total. Found t_k_ho[{k}] = {t_val} with C_total = {C_total}.")
+
+    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
     # 1. Inicialização de q_j_dist
     # Validações já garantem C_total >= 0
     q_j_dist = [0.0] * (C_total + 1) 
@@ -1305,8 +1409,9 @@ def calculate_qj_bpp_br(
                     
                     q_term_idx = j_iter - l_val * current_b_new
                     # q_term_idx >= 0 é garantido por max_l_new
-                    if q_term_idx < len(q_j_dist): # Verificação defensiva
-                        soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
+                    # A validação q_term_idx < len(q_j_dist) também deve ser verdadeira
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
                 
                 total_contribution_for_j += current_alpha_new * current_b_new * soma_interna_new
 
@@ -1334,8 +1439,8 @@ def calculate_qj_bpp_br(
                         B_prob_ge_l_ho = float(current_B_dist_ho[B_list_idx])
 
                     q_term_idx = j_iter - l_val * current_b_ho
-                    if q_term_idx < len(q_j_dist): # Verificação defensiva
-                        soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
                 
                 total_contribution_for_j += current_alpha_ho * current_b_ho * soma_interna_ho
 
@@ -1351,8 +1456,8 @@ def calculate_qj_bpp_br(
         q_j_dist_normalizado = [val / soma_total_q for val in q_j_dist]
     else:
         # Este caso não deve ser alcançado se q_j_dist[0]=1.0 e C_total >= 0
-        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}).")
-
+        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}). q_j_dist={q_j_dist}")
+    
     return q_j_dist_normalizado
     # --- FIM DA LÓGICA DE CÁLCULO ---
     C_total_val_fail = 2
