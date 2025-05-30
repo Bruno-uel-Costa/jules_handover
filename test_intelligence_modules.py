@@ -96,10 +96,11 @@ class TestActorCriticLearning(unittest.TestCase):
                             f"Final avg reward period: {final_avg_reward_period:.2f}. "
                             f"Expected improvement: > {reward_improvement_threshold}")
         elif num_episodes_test > 0 and len(episode_rewards) > 0:
-             print(f"Not enough distinct '{log_interval}-episode average reward' periods to compare robustly "
-                   f"(need at least 2, got {len(avg_rewards_history_for_assertion)}). "
-                   "Consider increasing num_episodes_test or decreasing log_interval if this test fails. "
-                   f"Overall average reward: {np.mean(episode_rewards):.2f}")
+            msg_part1 = f"Not enough distinct '{log_interval}-episode average reward' periods to compare robustly "
+            msg_part2 = f"(need at least 2, got {len(avg_rewards_history_for_assertion)}). "
+            msg_part3 = "Consider increasing num_episodes_test or decreasing log_interval if this test fails. "
+            msg_part4 = f"Overall average reward: {np.mean(episode_rewards):.2f}"
+            print(msg_part1 + msg_part2 + msg_part3 + msg_part4)
              self.assertTrue(len(episode_rewards) == num_episodes_test, "Training did not complete all episodes.")
         else:
             self.fail("Training loop did not produce enough data or did not run.")
