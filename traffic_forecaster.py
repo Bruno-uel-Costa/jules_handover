@@ -4,7 +4,7 @@
 import torch
 import torch.nn as nn
 import numpy as np # Added numpy import
-from kan_layer import KANLayer 
+from kan_layer import KANLayer
 
 def generate_sine_wave_data(num_points=500, sequence_length=10, predict_steps=1, noise_level=0.05, normalization_range=(0.0, 1.0)):
     # num_points: total de pontos na série temporal
@@ -13,19 +13,19 @@ def generate_sine_wave_data(num_points=500, sequence_length=10, predict_steps=1,
     # noise_level: magnitude do ruído
     # normalization_range: tuple (min_val, max_val) for data normalization
 
-    time_steps = np.linspace(0, 100, num_points) 
-    data = np.sin(time_steps * 0.5) + np.sin(time_steps * 0.1) 
+    time_steps = np.linspace(0, 100, num_points)
+    data = np.sin(time_steps * 0.5) + np.sin(time_steps * 0.1)
     data += np.random.normal(0, noise_level, num_points)
 
     # Normalize data to the specified range
     data_min_orig = np.min(data)
     data_max_orig = np.max(data)
-    
+
     norm_min, norm_max = normalization_range
-    
+
     if data_max_orig - data_min_orig != 0:
          data_normalized = norm_min + (data - data_min_orig) * (norm_max - norm_min) / (data_max_orig - data_min_orig)
-    else: 
+    else:
          # Handle cases where data is constant, to avoid division by zero
          data_normalized = np.full_like(data, norm_min) # All values will be norm_min if data is constant
 
@@ -34,58 +34,58 @@ def generate_sine_wave_data(num_points=500, sequence_length=10, predict_steps=1,
         X.append(data_normalized[i:(i + sequence_length)])
         Y.append(data_normalized[i + sequence_length : i + sequence_length + predict_steps])
 
-    X_tensor = torch.tensor(np.array(X), dtype=torch.float32).unsqueeze(-1) 
+    X_tensor = torch.tensor(np.array(X), dtype=torch.float32).unsqueeze(-1)
     Y_tensor = torch.tensor(np.array(Y), dtype=torch.float32)
-    
-    if predict_steps == 1 and len(Y_tensor.shape) == 1: 
-        Y_tensor = Y_tensor.unsqueeze(-1) 
-    elif predict_steps > 1 and len(Y_tensor.shape) == 1: 
+
+    if predict_steps == 1 and len(Y_tensor.shape) == 1:
+        Y_tensor = Y_tensor.unsqueeze(-1)
+    elif predict_steps > 1 and len(Y_tensor.shape) == 1:
         Y_tensor = Y_tensor.reshape(-1, predict_steps)
-    elif len(Y_tensor.shape) == 2 and Y_tensor.shape[1] != predict_steps: 
+    elif len(Y_tensor.shape) == 2 and Y_tensor.shape[1] != predict_steps:
         raise ValueError(f"Y_tensor shape {Y_tensor.shape} not consistent with predict_steps {predict_steps}")
 
     return X_tensor, Y_tensor, data_normalized, time_steps
 
 
 class TrafficForecasterNet(nn.Module):
-    def __init__(self, 
-                 input_sequence_length, 
-                 num_features_per_step, 
-                 output_sequence_length, 
-                 hidden_dim_kan1=64, 
-                 grid_size_kan=5, 
-                 spline_order_kan=3, 
-                 grid_range_kan=(-1.0, 1.0)): 
+    def __init__(self,
+                 input_sequence_length,
+                 num_features_per_step,
+                 output_sequence_length,
+                 hidden_dim_kan1=64,
+                 grid_size_kan=5,
+                 spline_order_kan=3,
+                 grid_range_kan=(-1.0, 1.0)):
         super(TrafficForecasterNet, self).__init__()
 
         self.input_sequence_length = input_sequence_length
         self.num_features_per_step = num_features_per_step
         self.output_sequence_length = output_sequence_length
-        
+
         self.flatten = nn.Flatten()
-        
+
         flattened_input_dim = input_sequence_length * num_features_per_step
-        
+
         self.kan1 = KANLayer(
-            input_dim=flattened_input_dim, 
-            output_dim=hidden_dim_kan1, 
-            grid_size=grid_size_kan, 
-            spline_order=spline_order_kan, 
+            input_dim=flattened_input_dim,
+            output_dim=hidden_dim_kan1,
+            grid_size=grid_size_kan,
+            spline_order=spline_order_kan,
             grid_range=grid_range_kan
         )
-        
+
         self.kan_out = KANLayer(
-            input_dim=hidden_dim_kan1, 
-            output_dim=output_sequence_length, 
-            grid_size=grid_size_kan, 
-            spline_order=spline_order_kan, 
-            grid_range=grid_range_kan 
+            input_dim=hidden_dim_kan1,
+            output_dim=output_sequence_length,
+            grid_size=grid_size_kan,
+            spline_order=spline_order_kan,
+            grid_range=grid_range_kan
         )
 
     def forward(self, x):
-        x = self.flatten(x) 
-        x = self.kan1(x)    
-        x = self.kan_out(x) 
+        x = self.flatten(x)
+        x = self.kan1(x)
+        x = self.kan_out(x)
         return x
 
 if __name__ == "__main__":
@@ -100,14 +100,14 @@ if __name__ == "__main__":
     input_seq_len = 20       # Input sequence length for data generation and network
     features_per_step = 1    # Number of features at each time step (sine wave is univariate)
     output_seq_len = 1       # Predicting one step ahead
-    
+
     hidden_dim_kan1 = 32     # KAN hidden dimension
     grid_size_kan = 5        # KAN grid size
     spline_order_kan = 3     # KAN spline order (cubic)
-    
+
     # Normalization range for data generation and KAN grid_range
     # KANs expect input features to be within their grid_range.
-    normalization_target_range = (0.0, 1.0) 
+    normalization_target_range = (0.0, 1.0)
 
     print(f"Training Params: LR={learning_rate}, Epochs={num_epochs}")
     print(f"Network Params: InputSeqLen={input_seq_len}, OutputSeqLen={output_seq_len}, HiddenKAN={hidden_dim_kan1}")
@@ -117,10 +117,10 @@ if __name__ == "__main__":
     # Data will be normalized to normalization_target_range, suitable for KAN input.
     # We are not using data_normalized_plot or time_steps_plot in this version of the plotting code.
     X_train, Y_train, _, _ = generate_sine_wave_data(
-        num_points=500, 
-        sequence_length=input_seq_len, 
-        predict_steps=output_seq_len, 
-        noise_level=0.05, 
+        num_points=500,
+        sequence_length=input_seq_len,
+        predict_steps=output_seq_len,
+        noise_level=0.05,
         normalization_range=normalization_target_range
     )
     print(f"Generated training data: X_train shape {X_train.shape}, Y_train shape {Y_train.shape}")
@@ -138,16 +138,16 @@ if __name__ == "__main__":
         spline_order_kan=spline_order_kan,
         grid_range_kan=normalization_target_range # Critical: KAN grid matches data normalization
     ).to(device)
-    
+
     X_train = X_train.to(device)
     Y_train = Y_train.to(device)
-    
+
     print("KAN-based TrafficForecasterNet instantiated and moved to device.")
 
     # 5. Define Loss Function and Optimizer
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(kan_forecaster_net.parameters(), lr=learning_rate)
-    
+
     print("Loss function (MSELoss) and Optimizer (Adam) defined.")
     print("\n--- Training Setup Complete. Starting Training Loop ---")
 
@@ -158,15 +158,15 @@ if __name__ == "__main__":
 
         # Forward pass
         predictions = kan_forecaster_net(X_train) # X_train is already on the correct device
-        
+
         # Calculate loss
         loss = criterion(predictions, Y_train) # Y_train is already on the correct device
-        
+
         # Backward pass and optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        
+
         if (epoch + 1) % 10 == 0:
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.6f}")
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     print("\n--- Visualization Section ---")
     try:
         import matplotlib.pyplot as plt
-        
+
         print("Attempting to visualize predictions...")
         kan_forecaster_net.eval() # Set model to evaluation mode
         with torch.no_grad():
@@ -189,12 +189,12 @@ if __name__ == "__main__":
             trained_predictions = kan_forecaster_net(X_train)
 
         # Move data to CPU and convert to NumPy for plotting
-        original_data_plot = Y_train.cpu().numpy().squeeze() 
+        original_data_plot = Y_train.cpu().numpy().squeeze()
         predictions_plot = trained_predictions.cpu().numpy().squeeze()
-        
+
         # Plotting against sample index
         plt.figure(figsize=(12, 6))
-        
+
         # Plot a segment for clarity if data is large
         plot_segment_length = 200
         original_segment = original_data_plot[:plot_segment_length]

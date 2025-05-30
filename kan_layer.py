@@ -22,7 +22,7 @@ def get_knots(start, end, n_bases=5, spline_order=3):
 
     start_calc = start - x_range * 0.001 # Use different var names
     end_calc = end + x_range * 0.001
-    
+
     m = spline_order - 1 # degree
     # nk = n_bases - m  # number of interior knots, this is from "Generalized Additive Models" by Wood (2017) for P-splines
                         # For B-splines, n_bases = number of knots - spline_order - 1 for scipy's convention if knots are non-repeating at ends.
@@ -30,7 +30,7 @@ def get_knots(start, end, n_bases=5, spline_order=3):
                         # The original helper.py logic for knots seems to aim for n_bases functions.
                         # n_knots = n_bases + spline_order + 1 (common for some definitions)
                         # Let's stick to original helper.py knot calculation logic for now.
-    
+
     # Original logic from helper.py: nk = n_bases - m for number of *interior* knots.
     # Total knots = nk + 2 * (m+1) for padding.
     # Let's re-verify the knot calculation logic based on n_bases directly.
@@ -49,7 +49,7 @@ def get_knots(start, end, n_bases=5, spline_order=3):
     # dknots = (end_calc - start_calc) / (nk -1) if nk > 1. If nk=1, dknots is not well-defined here.
     # If n_bases <= m (spline_order-1), then nk <=0. This needs careful handling.
     # Example: n_bases=3, spline_order=3 -> m=2, nk=1. (end_calc - start_calc) / 0 -> NaN/Inf
-    
+
     if n_bases <= spline_order -1 : # nk <= 0, problematic for dknots
         # Fallback: minimal knots for this case or raise error
         # For a single basis function (n_bases=1), you still need spline_order+1 knots.
@@ -83,12 +83,12 @@ def get_knots(start, end, n_bases=5, spline_order=3):
                 steps=num_internal_knots + 2 * spline_order
             )
     else: # n_bases > spline_order -1
-        m = spline_order - 1 
+        m = spline_order - 1
         nk = n_bases - m # number of interior knots
         dknots = (end_calc - start_calc) / (nk - 1)
         knots = torch.linspace(
-            start=start_calc - dknots * (m + 1), 
-            end=end_calc + dknots * (m + 1), 
+            start=start_calc - dknots * (m + 1),
+            end=end_calc + dknots * (m + 1),
             steps=nk + 2 * (m + 1) # Original had m+2, typo? should be 2*m+2 or 2*(m+1)
                                     # nk + 2m + 2
         )
@@ -99,16 +99,16 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
     cuda = x.is_cuda
     if len(x.shape) != 1:
         raise ValueError("x has to be 1 dimentional for get_X_spline")
-    
+
     # Ensure knots and other params for tck are on the same device as x if possible, or CPU for scipy
     knots_np = knots.cpu().numpy()
-    
+
     # tck for scipy: knots, coefficients (c), degree (k)
     # Scipy's BSpline uses degree k (spline_order).
     # n_bases here is the number of basis functions.
     # Number of data points is len(x).
     # X will be (len(x), n_bases)
-    
+
     X_spl = torch.zeros([len(x), n_bases], dtype=x.dtype, device=x.device)
     x_np = x.detach().cpu().numpy() # Ensure detach before converting to numpy
 
@@ -116,8 +116,8 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
         # Create a coefficient vector for the i-th basis function
         # This is a standard way to evaluate individual basis functions with splev
         vec_c = np.zeros(n_bases)
-        vec_c[i] = 1.0 
-        
+        vec_c[i] = 1.0
+
         # Construct tck for the i-th basis function.
         # The number of knots must be n_coeffs + degree + 1 for scipy's splev if c is given.
         # Here, we are providing coefficients for *basis functions*, not for spline interpolation of data.
@@ -129,33 +129,33 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
         # Let's assume `knots` is correctly formed by `get_knots` such that `n_bases` basis functions can be derived.
         # The number of coefficients `c` should be `len(knots) - (degree+1)`.
         # If `n_bases` is this value, then `vec_c` is of the correct length.
-        
+
         # Adjust `vec_c` length if it doesn't match `len(knots_np) - spline_order - 1`
         # This is a bit of a hack; implies `n_bases` might not be what `splev` expects for `c` length.
         # A common convention: n_coeffs = n_knots - degree - 1. If n_bases is n_coeffs, this is fine.
         # Let's trust the original structure from helper.py where n_bases is used for vec_c length.
-        
+
         current_tck = (knots_np, vec_c, spline_order-1) # Scipy uses degree (k-1 if k is order)
                                                         # If spline_order is "order k", then degree is k.
                                                         # The original code had spline_order, which means degree for splev.
                                                         # Let's assume spline_order means degree for splev.
-        
+
         # If spline_order is order (e.g. 3 for quadratic, 4 for cubic), then degree is spline_order-1
         # If spline_order is degree (e.g. 3 for cubic), then degree is spline_order.
         # The helper.py uses `m = spline_order - 1` as degree-like.
         # And BSpline class init has `spline_order` which seems to be degree.
         # Let's assume `spline_order` parameter is "degree k".
-        
+
         # SciPy BSpline: k is degree. knots length M. coeffs length M-k-1.
         # So, if spline_order is degree k, len(c) = len(knots) - k - 1.
         # And n_bases should be this len(c).
-        
+
         # The tck for splev: (knots, c, k=degree)
         # It seems the original code's `n_bases` corresponds to `len(c)`.
         # And `spline_order` to `k` (degree).
-        
+
         tck_for_splev = (knots_np, vec_c, spline_order) # Assuming spline_order is degree
-        
+
         basis_eval_np = si.splev(x_np, tck_for_splev, der=0)
         X_spl[:, i] = torch.from_numpy(basis_eval_np).to(x.device, dtype=x.dtype)
 
@@ -176,13 +176,13 @@ def get_S(n_bases=5, spline_order=3, add_intercept=True):
 
     for _ in range(m2): # Corrected loop to iterate m2 times
         S_np = np.diff(S_np, axis=0)
-    
+
     if S_np.shape[0] == 0: # Handle case where diff results in empty matrix (e.g. n_bases=1, m2=1)
         S_np = np.zeros((n_bases, n_bases)) # Or some other appropriate small penalty
     else:
         S_np = np.dot(S_np.T, S_np)
         S_np = (S_np + S_np.T) / 2
-    
+
     if add_intercept:
         zeros_h = np.zeros_like(S_np[:1, :])
         S_np = np.vstack([zeros_h, S_np])
@@ -204,7 +204,7 @@ def _trunc(x, minval=None, maxval=None):
 # For now, keeping them.
 def encodeSplines(x, n_bases=5, spline_order=3, start=None, end=None, warn=True):
     if len(x.shape) == 1:
-        x_reshaped = x.reshape((-1, 1)) 
+        x_reshaped = x.reshape((-1, 1))
     else:
         x_reshaped = x
 
@@ -218,8 +218,8 @@ def encodeSplines(x, n_bases=5, spline_order=3, start=None, end=None, warn=True)
     if x_reshaped.max() > end_val:
         if warn: print("WARNING, x.max() > end. Truncating.")
         x_reshaped = _trunc(x_reshaped, maxval=end_val)
-    
-    bs = BSpline(start_val.item(), end_val.item(), n_bases=n_bases, spline_order=spline_order) 
+
+    bs = BSpline(start_val.item(), end_val.item(), n_bases=n_bases, spline_order=spline_order)
 
     n_rows, n_cols = x_reshaped.shape
     x_long = x_reshaped.reshape((-1,))
@@ -228,7 +228,7 @@ def encodeSplines(x, n_bases=5, spline_order=3, start=None, end=None, warn=True)
 
 
 def corr2d_stack(X_tensor, K_tensor):
-    out = torch.stack([torch.matmul(x_item, k_item) for x_item, k_item in zip(X_tensor, K_tensor)]).squeeze(-1) 
+    out = torch.stack([torch.matmul(x_item, k_item) for x_item, k_item in zip(X_tensor, K_tensor)]).squeeze(-1)
     out = out.permute((1, 2, 0))
     return out
 
@@ -240,18 +240,18 @@ class BSpline:
         self.end = float(end)
         self.n_bases = n_bases
         self.spline_order = spline_order # This is degree k for splines
-        
+
         # Ensure start < end for get_knots
         if self.start >= self.end:
             # Default to a small range if start >= end to prevent errors in knot calculation
             # A warning should be issued or this handled by KANLayer's grid_range validation
             # Forcing end > start for now for robustness in BSpline itself
-            self.end = self.start + 1.0 
+            self.end = self.start + 1.0
             # print(f"Warning: BSpline start >= end ({start}>={end}). Adjusted end to {self.end}")
 
 
         self.knots = get_knots(torch.tensor(self.start), torch.tensor(self.end), self.n_bases, self.spline_order)
-        
+
         # Store S as numpy array, convert to tensor on demand
         s_matrix_np = get_S(self.n_bases, self.spline_order, add_intercept=False).numpy()
         # Ensure S matrix has correct dimensions even if n_bases or spline_order is small
@@ -281,13 +281,13 @@ class BSpline:
     def predict(self, x, add_intercept=False):
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
-        
+
         current_device = x.device
-        
+
         # Clamp x to be within [start, end] of the spline definition
         # using tensor operations for clamping
         x_clamped = torch.clamp(x, min=self.start, max=self.end)
-        
+
         knots_device = self.knots.to(current_device)
 
         # get_X_spline expects add_intercept=False for KANLayer use typically
@@ -297,7 +297,7 @@ class BSpline:
             knots=knots_device,
             n_bases=self.n_bases,
             spline_order=self.spline_order,
-            add_intercept=add_intercept 
+            add_intercept=add_intercept
         )
 
 # KANLayer Implementation
@@ -328,9 +328,9 @@ class KANLayer(nn.Module):
         self.b_spline_evaluators = []
         for _ in range(input_dim):
             spline_evaluator = BSpline(
-                start=grid_range[0], 
-                end=grid_range[1], 
-                n_bases=grid_size, 
+                start=grid_range[0],
+                end=grid_range[1],
+                n_bases=grid_size,
                 spline_order=spline_order
             )
             self.b_spline_evaluators.append(spline_evaluator)
@@ -341,7 +341,7 @@ class KANLayer(nn.Module):
             raise ValueError(f"Input feature dimension mismatch. Expected {self.input_dim}, got {x.shape[1]}")
 
         batch_size = x.shape[0]
-        
+
         # Initialize output tensor
         # spline_output will store sum_i phi_ij(x_i) for each j
         total_output = torch.zeros(batch_size, self.output_dim, device=x.device, dtype=x.dtype)
@@ -352,7 +352,7 @@ class KANLayer(nn.Module):
 
                 # 1. Base term: w_ij * x_i
                 base_contribution_ij = self.base_weights[j, i] * input_feature_i
-                
+
                 # 2. Spline term: sum_k (c_ijk * B_k(x_i))
                 # BSpline.predict expects a 1D tensor (batch of values for one feature)
                 # and returns (batch_size, grid_size)
@@ -360,22 +360,22 @@ class KANLayer(nn.Module):
                 basis_values_i = basis_values_i.to(x.device, dtype=x.dtype) # Ensure device and dtype
 
                 current_spline_coeffs_ji = self.spline_coeffs[j, i, :] # Shape: (grid_size)
-                
+
                 # Einstein summation: 'bk,k->b' means sum over k for each b in batch
                 # basis_values_i: (batch_size, grid_size)
                 # current_spline_coeffs_ji: (grid_size)
                 # spline_activation_ij: (batch_size)
                 spline_activation_ij = torch.einsum('bk,k->b', basis_values_i, current_spline_coeffs_ji)
-                
+
                 # Add contributions for this phi_ij(x_i) to the j-th output
                 total_output[:, j] += base_contribution_ij + spline_activation_ij
-                
+
         return total_output
 
 
 if __name__ == '__main__':
     print("kan_layer.py executed as main.")
-    
+
     # Test BSpline (basic check, more thorough tests for knots and eval if issues arise)
     print("\n--- BSpline Test (from KANLayer context) ---")
     bs_test = BSpline(start=0.0, end=1.0, n_bases=5, spline_order=3)
@@ -402,7 +402,7 @@ if __name__ == '__main__':
     # Create dummy input normalized to grid_range for meaningful spline activation
     dummy_kan_input = torch.rand(batch_s, input_d, dtype=torch.float32) # Values in [0,1]
     # If grid_range was [-1,1], input would be: 2 * torch.rand(batch_s, input_d) - 1
-    
+
     print("KANLayer input shape:", dummy_kan_input.shape)
     print("KANLayer input (first sample):", dummy_kan_input[0])
 
@@ -414,7 +414,7 @@ if __name__ == '__main__':
     # Check if gradients can be computed (requires_grad should be True for parameters)
     print(f"\nKANLayer spline_coeffs requires_grad: {kan_layer.spline_coeffs.requires_grad}")
     print(f"KANLayer base_weights requires_grad: {kan_layer.base_weights.requires_grad}")
-    
+
     # Simple loss and backward pass test
     if kan_output.requires_grad: # Output should require grad if input does or params do
         try:

@@ -109,7 +109,7 @@ if __name__ == "__main__":
     state_value = agent.evaluate_state(dummy_state_list)
     print(f"Estimated State Value: {state_value}")
     # The output is a tensor like tensor([[0.0512]]), to get the float: state_value.item() or state_value[0,0].item()
-    print(f"Estimated State Value (float): {state_value.item()}") 
+    print(f"Estimated State Value (float): {state_value.item()}")
 
 
     # Test calculate_reward function
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     P_F_sample = 0.01  # Example: 1% handover failure probability
     U_nonGC_sample = 0.7 # Example: 70% utilization of non-GC channels
     N_GC_sample = 2      # Example: 2 Guard Channels
-    
+
     reward = calculate_reward(P_B_sample, P_F_sample, U_nonGC_sample, N_GC_sample)
     print(f"Calculated Reward with P_B={P_B_sample}, P_F={P_F_sample}, U_nonGC={U_nonGC_sample}, N_GC={N_GC_sample}: {reward}")
     # Expected: -(10*0.05) - (20*0.01) + (0.5*0.7) - (0.1*2)
