@@ -1,3 +1,4 @@
+import numpy as np # Added import
 from math import floor
 from typing import List # Keep only one set of these imports
 
@@ -650,62 +651,13 @@ if __name__ == "__main__":
         
         qj_match = diff_sum_qj < 1e-9
         if qj_match:
-            print("  SUCESSO: Distribuições BR (t_k=0) e CS são idênticas.")
-            
-            print("\n  --- Comparando Probabilidades de Bloqueio (BR com t_k=0 vs CS) ---")
-            pb_br_params = {
-                "C_total": br_params_comp["C_total"],
-                "q_j_dist": q_br_comp,
-                "b_k_new": br_params_comp["b_k_new"],
-                "b_k_ho": br_params_comp["b_k_ho"],
-                "t_k_new": br_params_comp["t_k_new"], # Lista de zeros
-                "t_k_ho": br_params_comp["t_k_ho"]  # Lista de zeros
-            }
-            pb_br_results = calculate_blocking_probabilities_br(**pb_br_params)
-            
-            pb_cs_params = {
-                "C_total": cs_example_params_for_comp["C_total"],
-                "q_j_dist": q_cs_comp,
-                "b_k_new": cs_example_params_for_comp["b_k_new"],
-                "b_k_ho": cs_example_params_for_comp["b_k_ho"]
-            }
-            pb_cs_results_dict = calculate_blocking_probabilities_cs(**pb_cs_params)
-            # Adaptar chaves do pb_cs_results_dict para corresponder às de pb_br_results para comparação
-            pb_cs_results_adapted = {
-                'P_B_new': pb_cs_results_dict.get('C_bk_new', []), # Em CS, C_bk = P_B
-                'P_B_handover': pb_cs_results_dict.get('C_bk_ho', [])
-            }
-
-            print(f"    Resultados de Probabilidade de Bloqueio (BR com t_k=0):")
-            for key, value in pb_br_results.items():
-                print(f"      {key}: {[f'{v:.6f}' for v in value]}")
-            
-            print(f"    Resultados de Probabilidade de Bloqueio (CS):")
-            for key, value in pb_cs_results_adapted.items():
-                 print(f"      {key}: {[f'{v:.6f}' for v in value]}")
-
-            # Comparar os dicionários
-            pb_match = True
-            if len(pb_br_results['P_B_new']) != len(pb_cs_results_adapted['P_B_new']) or \
-               len(pb_br_results['P_B_handover']) != len(pb_cs_results_adapted['P_B_handover']):
-                pb_match = False
-            else:
-                for i in range(len(pb_br_results['P_B_new'])):
-                    if abs(pb_br_results['P_B_new'][i] - pb_cs_results_adapted['P_B_new'][i]) > 1e-9:
-                        pb_match = False
-                        break
-                if pb_match:
-                    for i in range(len(pb_br_results['P_B_handover'])):
-                        if abs(pb_br_results['P_B_handover'][i] - pb_cs_results_adapted['P_B_handover'][i]) > 1e-9:
-                            pb_match = False
-                            break
-            
-            if pb_match:
-                print("    SUCESSO: Probabilidades de Bloqueio BR (t_k=0) e CS são idênticas.")
-            else:
-                print("    FALHA: Probabilidades de Bloqueio BR (t_k=0) e CS diferem.")
+            print("  SUCESSO: Distribuições q(j) BR (t_k=0) e CS são idênticas.")
+            # A sub-seção de comparação de probabilidades de bloqueio que usava a assinatura antiga
+            # de calculate_blocking_probabilities_br foi removida, pois essa função foi
+            # redefinida para a política de Guard Channel e não aceita mais b_k/t_k por classe.
+            # O "NOVO TESTE" mais abaixo demonstra a nova calculate_blocking_probabilities_br.
         else:
-            print("  FALHA: Distribuições q(j) BR (t_k=0) e CS diferem, P_B não será comparado.")
+            print("  FALHA: Distribuições q(j) BR (t_k=0) e CS diferem.")
             
     except Exception as e:
         print(f"  Erro durante o teste de comparação: {e}")
@@ -749,20 +701,9 @@ if __name__ == "__main__":
                 print(f"    VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
             else:
                 print(f"    NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
-
-        print(f"\n  --- Testando calculate_blocking_probabilities_br com saída de 'Teste BR com Reservas Ativas' ---")
-        pb_br_active_params = {
-            "C_total": params_br_active["C_total"],
-            "q_j_dist": q_br_active,
-            "b_k_new": params_br_active["b_k_new"],
-            "b_k_ho": params_br_active["b_k_ho"],
-            "t_k_new": params_br_active["t_k_new"],
-            "t_k_ho": params_br_active["t_k_ho"]
-        }
-        pb_br_active_results = calculate_blocking_probabilities_br(**pb_br_active_params)
-        print(f"  Resultados de Probabilidade de Bloqueio (BR com t_k > 0):")
-        for key, value in pb_br_active_results.items():
-            print(f"    {key}: {[f'{v:.6f}' for v in value]}")
+        
+        # A chamada a calculate_blocking_probabilities_br com a assinatura antiga foi removida.
+        # O "NOVO TESTE" mais abaixo demonstra a nova calculate_blocking_probabilities_br com C_g.
 
     except Exception as e:
         print(f"  Erro durante o teste BR com reservas ativas: {e}")
@@ -820,195 +761,169 @@ if __name__ == "__main__":
         print(f"  FALHA no teste de validação: Exceção inesperada: {e}")
     print("-" * 50)
 
+    # --- NOVO TESTE: Demonstração do cálculo de probabilidades de bloqueio agregadas para GC ---
+    print("\n\n--- NOVO TESTE: INÍCIO DO CÁLCULO DE PROBABILIDADES DE BLOQUEIO (BPP com BR/GC) ---")
+    C_total_gc = 10
+    C_g_gc = 2
+
+    alpha_nc = [1.0] 
+    b_nc = [1]
+    B_cl_nc = [[1.0]] # Poisson
+
+    alpha_ho = [0.2]
+    b_ho = [1]
+    B_cl_ho = [[1.0]] # Poisson
+
+    # Para calculate_qj_bpp_br, t_k é o número de canais reservados CONTRA a classe k.
+    # Novas chamadas (NC) são bloqueadas se j > C_total - t_k_new.
+    # Para implementar Guard Channel (GC) onde C_g canais são reservados PARA HO,
+    # t_k_new deve ser C_g. Assim NC são bloqueadas se j > C_total - C_g.
+    # Chamadas de HO (consideradas de maior prioridade) não têm canais reservados contra elas, então t_k_ho = 0.
+    params_qj_gc = {
+        "C_total": C_total_gc,
+        "num_new_call_classes": 1, 
+        "alpha_k_new": alpha_nc, 
+        "b_k_new": b_nc, 
+        "B_cl_minus_1_new": B_cl_nc, 
+        "t_k_new": [C_g_gc], # t_k_new = C_g para política de Guard Channel
+        "num_ho_call_classes": 1, 
+        "alpha_k_ho": alpha_ho, 
+        "b_k_ho": b_ho, 
+        "B_cl_minus_1_ho": B_cl_ho, 
+        "t_k_ho": [0] # t_k_ho = 0 para a classe de maior prioridade
+    }
+
+    print("Parâmetros de Entrada para calculate_qj_bpp_br:")
+    for key, value in params_qj_gc.items():
+        print(f"  {key}: {value}")
+
+    q_j_br_gc_result = None
+    try:
+        q_j_br_gc_result = calculate_qj_bpp_br(**params_qj_gc)
+        print(f"Distribuição q_j_br Calculada: {[f'{val:.6f}' for val in q_j_br_gc_result]}")
+        sum_q_br_gc = sum(q_j_br_gc_result)
+        print(f"Soma de q_j_br: {sum_q_br_gc:.6f}")
+        if abs(sum_q_br_gc - 1.0) > 1e-5:
+             print(f"  AVISO: Soma de q_j_br não é 1.0! Diferença: {sum_q_br_gc - 1.0}")
+
+    except Exception as e:
+        print(f"  Erro durante a execução de calculate_qj_bpp_br para GC: {e}")
+        q_j_br_gc_result = None # Garante que não prossiga se houver erro
+    
+    if q_j_br_gc_result:
+        print("\nParâmetros de Entrada para calculate_blocking_probabilities_br:")
+        print(f"  C_total: {C_total_gc}")
+        print(f"  C_g: {C_g_gc}")
+        print(f"  Distribuição q_j_br Recebida: {[f'{val:.6f}' for val in q_j_br_gc_result]}")
+        
+        T_N_gc = C_total_gc - C_g_gc
+        print(f"Limiar de Bloqueio para Novas Chamadas (T_N = C_total - C_g): {T_N_gc}")
+
+        try:
+            pb_results_gc = calculate_blocking_probabilities_br(
+                C_total=C_total_gc, 
+                q_j_dist=q_j_br_gc_result, 
+                C_g=C_g_gc
+            )
+            
+            print("\nCalculando P_B_nova...")
+            print(f"  P_B_nova = Soma de q_j_br[j] de j={T_N_gc} até j={C_total_gc}")
+            print(f"  P_B_nova Calculada: {pb_results_gc['P_B_new']:.6f}")
+            
+            print("\nCalculando P_F_handover...")
+            print(f"  P_F_handover = q_j_br[{C_total_gc}]") # Nota: A chave no dict é 'P_B_handover'
+            print(f"  P_F_handover Calculada: {pb_results_gc['P_B_handover']:.6f}")
+
+        except Exception as e_pb_br:
+            print(f"  Erro durante a execução de calculate_blocking_probabilities_br para GC: {e_pb_br}")
+    
+    print("--- NOVO TESTE: FIM DO CÁLCULO DE PROBABILIDADES DE BLOQUEIO ---")
+    print("-" * 70)
+
 
 def calculate_blocking_probabilities_br(
     C_total: int,
     q_j_dist: List[float],
-    b_k_new: List[int],
-    b_k_ho: List[int],
-    t_k_new: List[int],
-    t_k_ho: List[int]
+    C_g: int
 ) -> dict:
     """
-    Calculates the blocking probabilities for different call classes in a system
-    with a Trunk Reservation (BR) policy, given the channel occupancy 
-    distribution q(j).
-
-    The blocking condition for a class k call (new or handover) requiring b_k 
-    channels, with a reservation threshold t_k (number of channels reserved for 
-    higher priority calls), is that the call is blocked if the number of 
-    currently occupied channels j is such that j + b_k > C_total - t_k.
+    Calculates aggregated blocking probabilities for new and handover calls
+    under a Guard Channel (GC) policy, given the channel occupancy 
+    distribution q(j) and the number of guard channels C_g.
 
     Args:
         C_total: Total capacity of the system in channels (int).
         q_j_dist: A list of floats representing the normalized channel
                   occupancy distribution q(j) for j = 0 to C_total.
-                  (Typically the output from calculate_qj_bpp_br).
-        b_k_new: A list of integers, where b_k_new[k] is the number of
-                 channels required by a call of new call class k.
-        b_k_ho: A list of integers, where b_k_ho[k] is the number of
-                channels required by a call of handover call class k.
-        t_k_new: List of trunk reservation parameters (tk) for new call classes.
-                 tk is the number of channels reserved FOR OTHER (higher priority) 
-                 classes. A call of new class k is subject to blocking based on
-                 C_total - t_k_new[k] as its effective capacity.
-                 Length must match b_k_new.
-        t_k_ho: Similar for handover call classes. Length must match b_k_ho.
+                  (Typically output from calculate_qj_bpp_br where t_k
+                  were set based on C_g).
+        C_g: Number of guard channels reserved exclusively for handover calls.
 
     Returns:
-        A dictionary containing the blocking probabilities:
+        A dictionary containing the aggregated blocking probabilities:
         {
-            'P_B_new': List[float] - Blocking probabilities for new call classes.
-                                   P_B_new[k] is P(blocking for new call class k).
-            'P_B_handover': List[float] - Blocking probabilities for handover call classes.
-                                        P_B_handover[k] is P(blocking for HO class k).
+            'P_B_new': float - Blocking probability for new calls.
+            'P_B_handover': float - Failure/Blocking probability for handover calls.
         }
-        Note: In many models, for circuit-switched systems without retries/queuing,
-        failure probability P_fk is the same as blocking probability P_Bk.
-        This function returns P_B (blocking probability).
     """
-    # Placeholder for calculation logic
-    
     # 1. Validate q_j_dist
     if not isinstance(q_j_dist, list):
         raise TypeError(f"q_j_dist must be a list. Got {type(q_j_dist)}.")
-    # C_total >= 0 is validated next. If C_total = 0, len(q_j_dist) should be 1.
-    # If C_total >= 0, then q_j_dist cannot be empty if len(q_j_dist) == C_total + 1.
     
-    for i, q_val in enumerate(q_j_dist):
-        if not isinstance(q_val, (float, int)):
-            raise TypeError(f"All elements in q_j_dist must be float or int. Found type {type(q_val)} at index {i}.")
-        if q_val < 0: # Probabilities cannot be negative
-            raise ValueError(f"All elements in q_j_dist must be non-negative. Found {q_val} at index {i}.")
-    
-    if q_j_dist: # Only sum if not empty, though other checks should ensure it's not empty if C_total >=0
-        sum_q_j = sum(q_j_dist)
-        if abs(sum_q_j - 1.0) > 1e-6:
-            raise ValueError(f"q_j_dist must be normalized (sum of elements must be close to 1.0). Sum is {sum_q_j}.")
-    elif C_total >= 0 : # If C_total >=0, q_j_dist should not be empty.
-        raise ValueError("q_j_dist is empty but C_total >= 0, which implies q_j_dist should have C_total+1 elements.")
-
-
-    # 2. Validate C_total
+    # Validação de C_total (feita antes para ser usada na validação de q_j_dist)
     if not isinstance(C_total, int):
         raise TypeError(f"C_total must be an integer. Got {type(C_total)}.")
     if C_total < 0:
         raise ValueError(f"C_total must be non-negative. Got {C_total}.")
+
     if len(q_j_dist) != C_total + 1:
         raise ValueError(f"Length of q_j_dist ({len(q_j_dist)}) must be C_total + 1 ({C_total + 1}).")
-    # This also implies q_j_dist is not empty if C_total >= 0.
+    # Se len(q_j_dist) == C_total + 1 e C_total >= 0, q_j_dist não pode ser vazia.
 
-    # 3. Validate Types of Lists for b_k and t_k
-    if not isinstance(b_k_new, list):
-        raise TypeError(f"b_k_new must be a list. Got {type(b_k_new)}.")
-    if not isinstance(b_k_ho, list):
-        raise TypeError(f"b_k_ho must be a list. Got {type(b_k_ho)}.")
-    if not isinstance(t_k_new, list):
-        raise TypeError(f"t_k_new must be a list. Got {type(t_k_new)}.")
-    if not isinstance(t_k_ho, list):
-        raise TypeError(f"t_k_ho must be a list. Got {type(t_k_ho)}.")
-
-    # 4. Validate Consistency of Length for b_k and t_k pairs
-    if len(b_k_new) != len(t_k_new):
-        raise ValueError(f"Length of b_k_new ({len(b_k_new)}) must match length of t_k_new ({len(t_k_new)}).")
-    if len(b_k_ho) != len(t_k_ho):
-        raise ValueError(f"Length of b_k_ho ({len(b_k_ho)}) must match length of t_k_ho ({len(t_k_ho)}).")
-
-    # Note: Detailed validation of elements within b_k_new, b_k_ho, t_k_new, t_k_ho
-    # (e.g., 0 < b_k <= C_total - t_k, and 0 <= t_k <= C_total)
-    # will be done during the calculation phase or could be added here if preferred.
-    # For now, focusing on the essential structural validations.
-    # The problem description for this step only asked for these "essential" validations.
-
-    # Adicionar validações detalhadas para elementos de b_k e t_k
-    # Validação de b_k_new
-    for i, b_val in enumerate(b_k_new):
-        if not isinstance(b_val, int):
-            raise TypeError(f"Elements in b_k_new must be integers. Found type {type(b_val)} at index {i}.")
-        if b_val <= 0: # b_k deve ser positivo
-            raise ValueError(f"Elements in b_k_new must be positive. Found {b_val} at index {i}.")
-        # Não podemos validar b_val <= C_total - t_k_new[i] aqui sem t_k_new[i],
-        # mas a lógica de bloqueio tratará casos onde b_val é muito grande.
-
-    # Validação de t_k_new
-    for i, t_val in enumerate(t_k_new):
-        if not isinstance(t_val, int):
-            raise TypeError(f"Elements in t_k_new must be integers. Found type {type(t_val)} at index {i}.")
-        if not (0 <= t_val <= C_total):
-             raise ValueError(f"Elements in t_k_new must satisfy 0 <= t_val <= C_total. Found t_k_new[{i}] = {t_val} with C_total = {C_total}.")
+    for i, q_val in enumerate(q_j_dist):
+        if not isinstance(q_val, (float, int)):
+            raise TypeError(f"All elements in q_j_dist must be float or int. Found type {type(q_val)} at index {i}.")
+        if q_val < 0: 
+            raise ValueError(f"All elements in q_j_dist must be non-negative. Found {q_val} at index {i}.")
     
-    # Validação de b_k_ho
-    for i, b_val in enumerate(b_k_ho):
-        if not isinstance(b_val, int):
-            raise TypeError(f"Elements in b_k_ho must be integers. Found type {type(b_val)} at index {i}.")
-        if b_val <= 0:
-            raise ValueError(f"Elements in b_k_ho must be positive. Found {b_val} at index {i}.")
+    sum_q_j = sum(q_j_dist)
+    if abs(sum_q_j - 1.0) > 1e-6:
+        raise ValueError(f"q_j_dist must be normalized (sum of elements must be close to 1.0). Sum is {sum_q_j}.")
 
-    # Validação de t_k_ho
-    for i, t_val in enumerate(t_k_ho):
-        if not isinstance(t_val, int):
-            raise TypeError(f"Elements in t_k_ho must be integers. Found type {type(t_val)} at index {i}.")
-        if not (0 <= t_val <= C_total):
-            raise ValueError(f"Elements in t_k_ho must satisfy 0 <= t_val <= C_total. Found t_k_ho[{i}] = {t_val} with C_total = {C_total}.")
+    # 2. Validação de C_g (C_total já validado)
+    if not isinstance(C_g, int):
+        raise TypeError(f"C_g must be an integer. Got {type(C_g)}.")
+    if not (0 <= C_g <= C_total):
+        raise ValueError(f"C_g must satisfy 0 <= C_g <= C_total. Got C_g={C_g} with C_total={C_total}.")
 
+    # Lógica de Cálculo
+    T_N = C_total - C_g  # Threshold for new calls
 
-    P_B_new_list = []
-    # Blocking condition for class k: j_occupied + b_k > C_total - t_k
-    # This means blocking occurs if j_occupied > C_total - t_k - b_k.
-    # So, sum q(j) from floor(C_total - t_k - b_k) + 1 up to C_total.
-    # Let threshold = C_total - t_k - b_k. We sum for j > threshold.
-    # lower_sum_idx = floor(threshold) + 1.
-    # If threshold < 0 (i.e., C_total - t_k < b_k), it means call is blocked even if j=0. P_B = 1.
-    # In this case, lower_sum_idx will be <= 0. range(max(0, lower_sum_idx), C_total + 1) sums all q(j).
+    P_B_nova = 0.0
+    # Uma nova chamada é bloqueada se j >= T_N (assumindo b_k=1 para chamadas novas agregadas)
+    # Ou, de forma mais geral, se j > T_N - b_k_nova.
+    # Para o modelo agregado simples de Guard Channel, assume-se b_k_nova = 1.
+    # Então, bloqueio se j > T_N - 1, ou seja, j >= T_N.
+    # Somar q_j_dist[j] para j de T_N até C_total.
     
-    for b_val, t_k_val in zip(b_k_new, t_k_new):
-        # Effective capacity for this class: C_eff = C_total - t_k_val
-        # Call is blocked if j_occupied + b_val > C_eff
-        # Or, j_occupied > C_eff - b_val
-        # Sum q(j) for j from floor(C_eff - b_val) + 1 to C_total
-        
-        # Check if b_val itself is compatible with the effective capacity C_total - t_k_val
-        if b_val > (C_total - t_k_val): # If channels needed > available channels after reservation
-            current_P_B = 1.0 # Always blocked
-        else:
-            lower_bound_j_exclusive = C_total - t_k_val - b_val
-            # We need to sum for j > lower_bound_j_exclusive
-            # So, j starts from floor(lower_bound_j_exclusive) + 1
-            # which is equivalent to (C_total - t_k_val - b_val) + 1, if integer, or floor+1
-            
-            # Simpler: sum q(j) where j + b_val > C_total - t_k_val
-            # The first j for which this is NOT blocked is when j + b_val <= C_total - t_k_val
-            # So, j_max_non_blocked = C_total - t_k_val - b_val
-            # Any j > j_max_non_blocked will be blocked.
-            # So, sum from j_max_non_blocked + 1 to C_total
-            
-            start_sum_idx = (C_total - t_k_val - b_val) + 1
-            current_P_B = 0.0
-            
-            # The loop should sum q(j) for j from max(0, start_sum_idx) to C_total
-            for j_idx in range(max(0, start_sum_idx), C_total + 1):
-                # Defensive check, though q_j_dist length is C_total + 1
-                if j_idx < len(q_j_dist): # Should always be true
-                    current_P_B += q_j_dist[j_idx]
-        P_B_new_list.append(current_P_B)
+    start_index_pb_new = T_N # T_N já é >= 0 por causa da validação de C_g
+    
+    # Se T_N > C_total (o que implica C_g < 0, prevenido pela validação), P_B_nova = 0.
+    # Se T_N <= C_total:
+    if start_index_pb_new <= C_total:
+        for j_idx in range(start_index_pb_new, C_total + 1):
+            # q_j_dist tem C_total + 1 elementos, então q_j_dist[C_total] é o último
+            P_B_nova += q_j_dist[j_idx]
+    # Se T_N > C_total, o range será vazio, P_B_nova permanece 0.0, o que é correto.
 
-    P_B_ho_list = []
-    # Logic is identical to P_B_new_list, but using b_k_ho and t_k_ho
-    for b_val, t_k_val in zip(b_k_ho, t_k_ho):
-        # Validations for b_val > 0 and 0 <= t_k_val <= C_total already done above.
-        
-        if b_val > (C_total - t_k_val): # If channels needed > available channels after reservation
-            current_P_B = 1.0 # Always blocked
-        else:
-            start_sum_idx = (C_total - t_k_val - b_val) + 1
-            current_P_B = 0.0
-            
-            for j_idx in range(max(0, start_sum_idx), C_total + 1):
-                if j_idx < len(q_j_dist): # Should always be true
-                    current_P_B += q_j_dist[j_idx]
-        P_B_ho_list.append(current_P_B)
+    P_F_handover = 0.0
+    # Chamadas de Handover são bloqueadas apenas se todos os C_total canais estiverem ocupados.
+    if C_total >= 0: # Garante que C_total é um índice válido para q_j_dist
+        P_F_handover = q_j_dist[C_total]
+    # Se C_total = -1 (impedido por validação), este acesso seria problemático.
+    # Se C_total = 0, q_j_dist = [q(0)=1.0]. P_F_handover = q_j_dist[0] = 1.0. Correto.
 
-    return {'P_B_new': P_B_new_list, 'P_B_handover': P_B_ho_list}
+    return {'P_B_new': P_B_nova, 'P_B_handover': P_F_handover}
 
 
 def calculate_qj_bpp_br(
@@ -1068,9 +983,112 @@ def calculate_qj_bpp_br(
     Returns:
         q_j_dist: Normalized channel occupancy distribution q(j). (List[float]).
     """
-    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
-    # As validações de entrada existentes são mantidas antes deste bloco.
+    # --- Validações de Entrada ---
+    # 1. Validate Types and Primitive Values (C_total, num_new_call_classes, num_ho_call_classes)
+    if not isinstance(C_total, int):
+        raise TypeError(f"C_total must be an integer. Got {type(C_total)}.")
+    if C_total < 0:
+        raise ValueError(f"C_total must be non-negative. Got {C_total}.")
+
+    if not isinstance(num_new_call_classes, int):
+        raise TypeError(f"num_new_call_classes must be an integer. Got {type(num_new_call_classes)}.")
+    if num_new_call_classes < 0:
+        raise ValueError(f"num_new_call_classes must be non-negative. Got {num_new_call_classes}.")
+
+    if not isinstance(num_ho_call_classes, int):
+        raise TypeError(f"num_ho_call_classes must be an integer. Got {type(num_ho_call_classes)}.")
+    if num_ho_call_classes < 0:
+        raise ValueError(f"num_ho_call_classes must be non-negative. Got {num_ho_call_classes}.")
+
+    # 2. Consistency and Content for New Call Lists (alpha_k_new, b_k_new, B_cl_minus_1_new, t_k_new)
+    if not isinstance(alpha_k_new, list):
+        raise TypeError(f"alpha_k_new must be a list. Got {type(alpha_k_new)}.")
+    if len(alpha_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of alpha_k_new ({len(alpha_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, val in enumerate(alpha_k_new):
+        if not isinstance(val, (float, int)):
+            raise TypeError(f"Elements in alpha_k_new must be float or int. Found type {type(val)} at index {k}.")
+        if val < 0:
+            raise ValueError(f"Elements in alpha_k_new must be non-negative. Found {val} at index {k}.")
+
+    if not isinstance(b_k_new, list):
+        raise TypeError(f"b_k_new must be a list. Got {type(b_k_new)}.")
+    if len(b_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of b_k_new ({len(b_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, val in enumerate(b_k_new):
+        if not isinstance(val, int):
+            raise TypeError(f"Elements in b_k_new must be integers. Found type {type(val)} at index {k}.")
+        if val <= 0:
+            raise ValueError(f"Elements in b_k_new must be positive. Found {val} at index {k}.")
+
+    if not isinstance(B_cl_minus_1_new, list):
+        raise TypeError(f"B_cl_minus_1_new must be a list. Got {type(B_cl_minus_1_new)}.")
+    if len(B_cl_minus_1_new) != num_new_call_classes:
+        raise ValueError(f"Length of B_cl_minus_1_new ({len(B_cl_minus_1_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, sub_list in enumerate(B_cl_minus_1_new):
+        if not isinstance(sub_list, list):
+            raise TypeError(f"Elements of B_cl_minus_1_new must be lists. Found type {type(sub_list)} at index {k}.")
+        for l_idx, val in enumerate(sub_list):
+            if not isinstance(val, (float, int)):
+                raise TypeError(f"Elements in B_cl_minus_1_new[{k}] must be float or int. Found type {type(val)} at index {l_idx}.")
+            if val < 0:
+                raise ValueError(f"Elements in B_cl_minus_1_new[{k}] must be non-negative. Found {val} at index {l_idx}.")
+
+    if not isinstance(t_k_new, list):
+        raise TypeError(f"t_k_new must be a list. Got {type(t_k_new)}.")
+    if len(t_k_new) != num_new_call_classes:
+        raise ValueError(f"Length of t_k_new ({len(t_k_new)}) must match num_new_call_classes ({num_new_call_classes}).")
+    for k, t_val in enumerate(t_k_new):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_new must be integers. Found type {type(t_val)} at index {k}.")
+        if not (0 <= t_val <= C_total):
+            raise ValueError(f"Elements in t_k_new must satisfy 0 <= t_val <= C_total. Found t_k_new[{k}] = {t_val} with C_total = {C_total}.")
+
+    # 3. Consistency and Content for Handover Call Lists (alpha_k_ho, b_k_ho, B_cl_minus_1_ho, t_k_ho)
+    if not isinstance(alpha_k_ho, list):
+        raise TypeError(f"alpha_k_ho must be a list. Got {type(alpha_k_ho)}.")
+    if len(alpha_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of alpha_k_ho ({len(alpha_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, val in enumerate(alpha_k_ho):
+        if not isinstance(val, (float, int)):
+            raise TypeError(f"Elements in alpha_k_ho must be float or int. Found type {type(val)} at index {k}.")
+        if val < 0:
+            raise ValueError(f"Elements in alpha_k_ho must be non-negative. Found {val} at index {k}.")
     
+    if not isinstance(b_k_ho, list):
+        raise TypeError(f"b_k_ho must be a list. Got {type(b_k_ho)}.")
+    if len(b_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of b_k_ho ({len(b_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, val in enumerate(b_k_ho):
+        if not isinstance(val, int):
+            raise TypeError(f"Elements in b_k_ho must be integers. Found type {type(val)} at index {k}.")
+        if val <= 0:
+            raise ValueError(f"Elements in b_k_ho must be positive. Found {val} at index {k}.")
+
+    if not isinstance(B_cl_minus_1_ho, list):
+        raise TypeError(f"B_cl_minus_1_ho must be a list. Got {type(B_cl_minus_1_ho)}.")
+    if len(B_cl_minus_1_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of B_cl_minus_1_ho ({len(B_cl_minus_1_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, sub_list in enumerate(B_cl_minus_1_ho):
+        if not isinstance(sub_list, list):
+            raise TypeError(f"Elements of B_cl_minus_1_ho must be lists. Found type {type(sub_list)} at index {k}.")
+        for l_idx, val in enumerate(sub_list):
+            if not isinstance(val, (float, int)):
+                raise TypeError(f"Elements in B_cl_minus_1_ho[{k}] must be float or int. Found type {type(val)} at index {l_idx}.")
+            if val < 0:
+                raise ValueError(f"Elements in B_cl_minus_1_ho[{k}] must be non-negative. Found {val} at index {l_idx}.")
+
+    if not isinstance(t_k_ho, list):
+        raise TypeError(f"t_k_ho must be a list. Got {type(t_k_ho)}.")
+    if len(t_k_ho) != num_ho_call_classes:
+        raise ValueError(f"Length of t_k_ho ({len(t_k_ho)}) must match num_ho_call_classes ({num_ho_call_classes}).")
+    for k, t_val in enumerate(t_k_ho):
+        if not isinstance(t_val, int):
+            raise TypeError(f"Elements in t_k_ho must be integers. Found type {type(t_val)} at index {k}.")
+        if not (0 <= t_val <= C_total): 
+            raise ValueError(f"Elements in t_k_ho must satisfy 0 <= t_val <= C_total. Found t_k_ho[{k}] = {t_val} with C_total = {C_total}.")
+
+    # --- INÍCIO DA LÓGICA DE CÁLCULO (APÓS VALIDAÇÕES) ---
     # 1. Inicialização de q_j_dist
     # Validações já garantem C_total >= 0
     q_j_dist = [0.0] * (C_total + 1) 
@@ -1305,8 +1323,9 @@ def calculate_qj_bpp_br(
                     
                     q_term_idx = j_iter - l_val * current_b_new
                     # q_term_idx >= 0 é garantido por max_l_new
-                    if q_term_idx < len(q_j_dist): # Verificação defensiva
-                        soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
+                    # A validação q_term_idx < len(q_j_dist) também deve ser verdadeira
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_new += q_j_dist[q_term_idx] * B_prob_ge_l_new
                 
                 total_contribution_for_j += current_alpha_new * current_b_new * soma_interna_new
 
@@ -1334,8 +1353,8 @@ def calculate_qj_bpp_br(
                         B_prob_ge_l_ho = float(current_B_dist_ho[B_list_idx])
 
                     q_term_idx = j_iter - l_val * current_b_ho
-                    if q_term_idx < len(q_j_dist): # Verificação defensiva
-                        soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
+                    # Removendo verificação defensiva if q_term_idx < len(q_j_dist) conforme pseudocódigo implícito
+                    soma_interna_ho += q_j_dist[q_term_idx] * B_prob_ge_l_ho
                 
                 total_contribution_for_j += current_alpha_ho * current_b_ho * soma_interna_ho
 
@@ -1351,8 +1370,8 @@ def calculate_qj_bpp_br(
         q_j_dist_normalizado = [val / soma_total_q for val in q_j_dist]
     else:
         # Este caso não deve ser alcançado se q_j_dist[0]=1.0 e C_total >= 0
-        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}).")
-
+        raise RuntimeError(f"Normalization failed: sum of q_j_dist is not positive ({soma_total_q}). q_j_dist={q_j_dist}")
+    
     return q_j_dist_normalizado
     # --- FIM DA LÓGICA DE CÁLCULO ---
     C_total_val_fail = 2
