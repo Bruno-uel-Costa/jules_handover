@@ -110,7 +110,7 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
     # X will be (len(x), n_bases)
     
     X_spl = torch.zeros([len(x), n_bases], dtype=x.dtype, device=x.device)
-    x_np = x.cpu().numpy()
+    x_np = x.detach().cpu().numpy() # Ensure detach before converting to numpy
 
     for i in range(n_bases):
         # Create a coefficient vector for the i-th basis function
