@@ -683,21 +683,22 @@ if __name__ == "__main__":
         q_br_active = calculate_qj_bpp_br(**params_br_active)
         print(f"  q_j_dist (BR, t_k={t_k_new_br_active_val}): {[f'{val:.6f}' for val in q_br_active]}")
         print(f"  Soma de q(j): {sum(q_br_active):.6f}")
-    # Comentário: Espera-se que q(j) para j > (C_total - t_k) sejam afetados (menores ou zero).
-    # Neste exemplo, para j > 3 (ou seja, j=4, j=5), a contribuição desta classe é zero.
-    # Se for a única classe, q(4) e q(5) devem ser 0.0.
-    admissible_threshold = C_total_br_active - t_k_new_br_active_val
-    print(f"  (Para esta classe, estados j > {admissible_threshold} não são permitidos pela reserva t_k={t_k_new_br_active_val})")
 
-    if len(q_br_active) > admissible_threshold + 1:
-        # Verifica se q(j) é zero para j > admissible_threshold
-        # (Isso só é estritamente verdade se esta for a ÚNICA classe de tráfego)
-        are_higher_states_zero = all(abs(q_br_active[j_idx]) < 1e-9 for j_idx in range(admissible_threshold + 1, len(q_br_active)))
-        if are_higher_states_zero:
-            print(f"  VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
-        else:
-            print(f"  NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
+        # Comentário: Espera-se que q(j) para j > (C_total - t_k) sejam afetados (menores ou zero).
+        # Neste exemplo, para j > 3 (ou seja, j=4, j=5), a contribuição desta classe é zero.
+        # Se for a única classe, q(4) e q(5) devem ser 0.0.
+        admissible_threshold = C_total_br_active - t_k_new_br_active_val
+        print(f"  (Para esta classe, estados j > {admissible_threshold} não são permitidos pela reserva t_k={t_k_new_br_active_val})")
 
+        if len(q_br_active) > admissible_threshold + 1:
+            # Verifica se q(j) é zero para j > admissible_threshold
+            # (Isso só é estritamente verdade se esta for a ÚNICA classe de tráfego)
+            are_higher_states_zero = all(abs(q_br_active[j_idx]) < 1e-9 for j_idx in range(admissible_threshold + 1, len(q_br_active)))
+            if are_higher_states_zero:
+                print(f"  VERIFICADO: q(j) é zero para j > {admissible_threshold} como esperado para este caso de classe única.")
+            else:
+                print(f"  NOTA: q(j) não é zero para j > {admissible_threshold}. Isso é esperado se houver outras classes com diferentes t_k.")
+        
     except Exception as e:
         print(f"  Erro durante o teste BR com reservas ativas: {e}")
     print("-" * 50)
@@ -801,11 +802,12 @@ def calculate_qj_bpp_br(
         t_k_new: List of trunk reservation parameters (tk) for new call classes.
                  tk is the number of channels reserved FOR OTHER (higher priority) classes.
                  A call of new class k is accepted if j_occupied_after_acceptance <= C_total - t_k_new[k].
-                 Constraint: 0 <= t_k_new[k] < C_total (t_k_new[k] = C_total would mean class k is always blocked).
+                 Constraint: 0 <= t_k_new[k] <= C_total.
                  If t_k_new[k] = 0, it means no channels are reserved against this class (it can use up to C_total).
+                 If t_k_new[k] = C_total, it means the class can only be accepted if j_occupied_after_acceptance <= 0.
                  Length must be `num_new_call_classes`. (List[int]).
         t_k_ho: Similar for handover call classes.
-                Constraint: 0 <= t_k_ho[k] < C_total.
+                Constraint: 0 <= t_k_ho[k] <= C_total.
                 Length must be `num_ho_call_classes`. (List[int]).
 
     Returns:
