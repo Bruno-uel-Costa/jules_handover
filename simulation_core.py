@@ -1,18 +1,15 @@
 import heapq
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+import random
+import matplotlib.pyplot as plt
+
+# Não há mais variáveis globais para contadores aqui.
 
 @dataclass(order=True)
 class SimEvent:
     event_time: float
-    # Usar um contador para desempate se tempos forem iguais, 
-    # heapq pode ter problemas com objetos não comparáveis.
-    # Adicionar um contador de sequência simples.
-    # No entanto, para simplicidade inicial, vamos omitir o contador de desempate
-    # e confiar que os tipos de evento ou dados não causarão problemas de comparação.
-    # Se o heapq reclamar sobre tipos não comparáveis quando event_times são iguais,
-    # precisaremos adicionar um contador de sequência como segundo item na tupla de ordenação.
-    event_type: str # Ordenação por event_type pode ocorrer se event_time for igual
+    event_type: str 
     event_data: Dict[str, Any] = field(default_factory=dict)
 
 class FutureEventList:
@@ -35,135 +32,295 @@ class FutureEventList:
             return None
         return self.events_heap[0].event_time
 
+# --- Funções de Geração de Amostras Aleatórias ---
+def generate_interarrival_time(lambda_rate: float) -> float:
+    """
+    Gera um tempo entre chegadas a partir de uma distribuição exponencial.
+    Args:
+        lambda_rate: A taxa (lambda) da distribuição exponencial. Deve ser > 0.
+    Returns: Float representando o tempo entre chegadas.
+    Raises: ValueError se lambda_rate não for positivo.
+    """
+    if lambda_rate <= 0:
+        raise ValueError("A taxa lambda (lambda_rate) deve ser positiva.")
+    return random.expovariate(lambda_rate)
 
-# --- Funções Placeholder para Manipuladores de Eventos ---
-def handle_new_call_arrival(current_time: float, event_data: Dict[str, Any], fel: FutureEventList):
-    print(f"  Manipulador: handle_new_call_arrival chamado em {current_time:.4f} com dados {event_data}")
-    # Exemplo de como um novo evento poderia ser agendado (não para este passo, apenas ilustrativo):
-    # if "call_duration" in event_data:
-    #     departure_time = current_time + event_data["call_duration"]
-    #     departure_event = SimEvent(departure_time, "PARTIDA_CHAMADA", {"call_id": event_data.get("id")})
-    #     fel.add_event(departure_event)
-    #     print(f"    Agendado PARTIDA_CHAMADA para call_id {event_data.get('id')} em {departure_time:.4f}")
+def generate_service_time(sim_params: dict) -> float:
+    """
+    Gera um tempo de serviço amostrado de uma distribuição exponencial.
+    Args:
+        sim_params: Dicionário contendo "mean_service_time".
+    Returns: O tempo de serviço amostrado.
+    """
+    mean_time = sim_params.get("mean_service_time")
+    if mean_time is None:
+        raise ValueError("mean_service_time não encontrado em sim_params.")
+    if not isinstance(mean_time, (float, int)):
+        raise TypeError(f"mean_service_time deve ser numérico. Got {type(mean_time)}.")
+    if mean_time <= 0:
+        raise ValueError("O tempo médio de serviço (mean_service_time) deve ser positivo.")
+    lambda_service_rate = 1.0 / mean_time
+    return random.expovariate(lambda_service_rate)
 
-def handle_handover_arrival(current_time: float, event_data: Dict[str, Any], fel: FutureEventList):
-    print(f"  Manipulador: handle_handover_arrival chamado em {current_time:.4f} com dados {event_data}")
+# --- Funções de Agendamento de Eventos ---
+def schedule_next_new_call(current_sim_time: float, fel: FutureEventList, sim_params: dict, sim_state: dict):
+    """
+    Calcula o tempo da próxima chegada de nova chamada, cria o evento
+    e o adiciona à FEL. Atualiza o contador de IDs de chamada em sim_state.
+    Utiliza 'lambda_new_calls' de sim_params para a taxa de chegada.
+    """
+    lambda_new_calls_rate = sim_params["lambda_new_calls"]
+    interarrival = generate_interarrival_time(lambda_new_calls_rate)
+    next_arrival_time = current_sim_time + interarrival
+    
+    call_id_num = sim_state["next_call_id_counter"]
+    call_id = f"NC_{call_id_num}"
+    sim_state["next_call_id_counter"] = call_id_num + 1
+    
+    event_data = {"id_chamada": call_id, "classe_servico": "default_new"}
+    new_event = SimEvent(event_time=next_arrival_time, event_type="CHEGADA_NOVA_CHAMADA", event_data=event_data)
+    fel.add_event(new_event)
+    print(f"  INFO: Agendada proxima CHEGADA_NOVA_CHAMADA (ID: {call_id}) para tempo {next_arrival_time:.4f} (interarrival: {interarrival:.4f})")
 
-def handle_call_departure(current_time: float, event_data: Dict[str, Any], fel: FutureEventList):
-    print(f"  Manipulador: handle_call_departure chamado em {current_time:.4f} com dados {event_data}")
+def initialize_simulation_events(fel: FutureEventList, sim_params: dict, sim_state: dict):
+    """
+    Agenda os eventos iniciais de chegada de chamada para dar partida no processo
+    de geração de tráfego, usando parâmetros de sim_params e atualizando o estado em sim_state.
+    """
+    schedule_next_new_call(0.0, fel, sim_params, sim_state)
 
+# --- Manipuladores de Eventos ---
+def handle_new_call_arrival(current_sim_time: float, event_data: Dict[str, Any], fel: FutureEventList, sim_params: dict, sim_state: dict):
+    sim_state["total_new_calls_generated"] += 1
+    call_id = event_data.get("id_chamada", "ID_DESCONHECIDO")
+    classe_servico = event_data.get("classe_servico", "N/A")
+    print(f"  Manipulador: handle_new_call_arrival. ID da Chamada: {call_id}. Classe: {classe_servico}. Tempo: {current_sim_time:.4f}. Total geradas: {sim_state['total_new_calls_generated']}")
+
+    previous_channels_occupied = sim_state["channels_occupied"]
+    delta_t = current_sim_time - sim_state["time_of_last_occupancy_change"]
+    sim_state["cumulative_channel_occupancy_time"] += previous_channels_occupied * delta_t
+
+    if sim_state["channels_occupied"] < sim_params["C_total"]:
+        sim_state["channels_occupied"] += 1
+        sim_state["total_calls_accepted"] += 1
+        call_service_time = generate_service_time(sim_params)
+        departure_time = current_sim_time + call_service_time
+        departure_event_data = {"id_chamada": call_id}
+        departure_event = SimEvent(event_time=departure_time, event_type="PARTIDA_CHAMADA", event_data=departure_event_data)
+        fel.add_event(departure_event)
+        print(f"    ACEITA: Chamada {call_id} alocada. Canais ocupados: {sim_state['channels_occupied']}. Agendada PARTIDA para {departure_time:.4f} (serviço: {call_service_time:.4f})")
+    else:
+        sim_state["total_calls_blocked"] += 1
+        print(f"    BLOQUEADA: Chamada {call_id} bloqueada. Todos os {sim_params['C_total']} canais ocupados. Canais ocupados atuais: {sim_state['channels_occupied']}")
+
+    sim_state["occupancy_log"].append((current_sim_time, sim_state["channels_occupied"]))
+    sim_state["time_of_last_occupancy_change"] = current_sim_time
+    schedule_next_new_call(current_sim_time, fel, sim_params, sim_state)
+
+def handle_handover_arrival(current_sim_time: float, event_data: Dict[str, Any], fel: FutureEventList, sim_params: dict, sim_state: dict):
+    print(f"  Manipulador: handle_handover_arrival chamado em {current_sim_time:.4f} com dados {event_data}")
+    # Lógica futura para handover: similar a new_call mas com diferentes t_k e estatísticas
+
+def handle_call_departure(current_sim_time: float, event_data: Dict[str, Any], fel: FutureEventList, sim_params: dict, sim_state: dict):
+    call_id = event_data.get("id_chamada", "ID_DESCONHECIDO")
+    previous_channels_occupied = sim_state["channels_occupied"]
+    delta_t = current_sim_time - sim_state["time_of_last_occupancy_change"]
+    sim_state["cumulative_channel_occupancy_time"] += previous_channels_occupied * delta_t
+
+    if sim_state["channels_occupied"] > 0:
+        sim_state["channels_occupied"] -= 1
+    else:
+        print(f"  AVISO: Tentativa de partida de chamada {call_id} quando channels_occupied já é 0. Tempo: {current_sim_time:.4f}")
+    
+    sim_state["total_calls_departed"] += 1
+    print(f"  Manipulador: handle_call_departure. ID da Chamada: {call_id}. Tempo: {current_sim_time:.4f}. Canais ocupados agora: {sim_state['channels_occupied']}")
+    sim_state["occupancy_log"].append((current_sim_time, sim_state["channels_occupied"]))
+    sim_state["time_of_last_occupancy_change"] = current_sim_time
 
 # --- Main Simulation Loop ---
-def run_simulation(initial_fel_events: List[SimEvent], max_simulation_time: float) -> None:
+def run_simulation(initial_fel_events: List[SimEvent], sim_params: dict, sim_state: dict) -> None: # sim_state é agora um argumento
     """
     Executes the main discrete-event simulation loop.
+    Modifies sim_state in place.
 
     Args:
         initial_fel_events: A list of SimEvent objects to initialize the
                             Future Event List (FEL).
-        max_simulation_time: The maximum simulation time. The simulation
-                             will stop if the next event's time exceeds this value.
+        sim_params: A dictionary containing fixed simulation parameters.
+                    Expected keys: "max_simulation_time", "lambda_new_calls", "C_total", "mean_service_time".
+        sim_state: A dictionary representing the current state of the simulation,
+                   which will be modified by this function.
     """
     print(f"--- Iniciando Simulação ---")
-    print(f"Tempo máximo de simulação: {max_simulation_time:.2f}")
-
-    # Inicializar o tempo da simulação e a Lista de Eventos Futuros (FEL)
-    current_simulation_time: float = 0.0
+    print(f"Parâmetros da Simulação: {sim_params}")
+    
     fel = FutureEventList()
-
-    # Adicionar eventos iniciais à FEL
-    if not initial_fel_events:
-        print("Nenhum evento inicial fornecido para a FEL.")
-    else:
+    # sim_state é agora passado como argumento e modificado diretamente.
+    # A inicialização de sim_state é feita pelo chamador.
+    
+    if initial_fel_events:
         for event in initial_fel_events:
-            if event.event_time < current_simulation_time:
-                print(f"AVISO: Evento inicial {event.event_type} com tempo {event.event_time:.2f} "
-                      f"é anterior ao tempo inicial da simulação {current_simulation_time:.2f} e será processado imediatamente.")
-                # Potencialmente ajustar current_simulation_time ou lidar de outra forma
             fel.add_event(event)
-        print(f"{len(initial_fel_events)} eventos iniciais adicionados à FEL.")
+        print(f"{len(initial_fel_events)} eventos iniciais pré-definidos adicionados à FEL.")
+    
+    initialize_simulation_events(fel, sim_params, sim_state)
 
-    # Loop principal da simulação
-    event_count = 0
+    processed_event_count = 0
+    max_simulation_time = sim_params.get("max_simulation_time", float('inf'))
+
     while not fel.is_empty():
         next_event_time = fel.peek_next_event_time()
-        if next_event_time is None: # Segurança, embora is_empty() deva cobrir
-            break 
+        if next_event_time is None: break
         
+        # Verifica se o tempo do próximo evento excede o tempo máximo de simulação
         if next_event_time > max_simulation_time:
             print(f"\nTempo do próximo evento ({next_event_time:.2f}) excede o tempo máximo de simulação ({max_simulation_time:.2f}).")
+            # Contabilizar o tempo de ocupação até max_simulation_time
+            if sim_state["time_of_last_occupancy_change"] < max_simulation_time :
+                 delta_t_final_max = max_simulation_time - sim_state["time_of_last_occupancy_change"]
+                 sim_state["cumulative_channel_occupancy_time"] += sim_state["channels_occupied"] * delta_t_final_max
+                 sim_state["occupancy_log"].append((max_simulation_time, sim_state["channels_occupied"]))
+                 # sim_state["time_of_last_occupancy_change"] = max_simulation_time # Não é crucial, simulação termina
+            sim_state["simulation_time"] = max_simulation_time # Atualizar o tempo final da simulação
             break
 
-        # Obter o próximo evento da FEL
         current_event = fel.get_next_event()
-        if current_event is None: # Segurança
-            break
+        if current_event is None: break
             
-        event_count += 1
+        processed_event_count += 1
 
-        # Avançar o tempo da simulação para o tempo do evento atual
-        # É crucial que o tempo só avance. Se um evento for agendado para o passado,
-        # isso indica um erro na lógica de agendamento do evento.
-        if current_event.event_time < current_simulation_time:
-            print(f"AVISO: Evento {current_event.event_type} (ID: {event_count}) com tempo {current_event.event_time:.2f} "
-                  f"ocorreu antes do tempo atual da simulação {current_simulation_time:.2f}. "
-                  f"Processando, mas isso pode indicar um problema.")
-            # Não se deve reverter o tempo; processar no tempo atual ou no tempo do evento.
-            # Para esta simulação, vamos processar no tempo do evento, mas isso é uma anomalia.
+        if current_event.event_time < sim_state["simulation_time"]:
+            print(f"AVISO: Evento {current_event.event_type} (ID: {processed_event_count}) com tempo {current_event.event_time:.2f} "
+                  f"ocorreu antes do tempo atual da simulação {sim_state['simulation_time']:.2f}. Processando.")
         
-        current_simulation_time = current_event.event_time
+        sim_state["simulation_time"] = current_event.event_time
 
-        # Renomeado event_count para processed_event_count para clareza
-        print(f"\nProcessando evento #{event_count}")
-        print(f"Tempo: {current_simulation_time:.4f} | Evento: {current_event.event_type} | Dados: {current_event.event_data}")
+        print(f"\nProcessando evento #{processed_event_count}")
+        print(f"Tempo: {sim_state['simulation_time']:.4f} | Evento: {current_event.event_type} | Dados: {current_event.event_data}")
 
-        # Chamar o handler de evento apropriado
         if current_event.event_type == "CHEGADA_NOVA_CHAMADA":
-            handle_new_call_arrival(current_simulation_time, current_event.event_data, fel)
+            handle_new_call_arrival(sim_state["simulation_time"], current_event.event_data, fel, sim_params, sim_state)
         elif current_event.event_type == "CHEGADA_HANDOVER":
-            handle_handover_arrival(current_simulation_time, current_event.event_data, fel)
+            handle_handover_arrival(sim_state["simulation_time"], current_event.event_data, fel, sim_params, sim_state) 
         elif current_event.event_type == "PARTIDA_CHAMADA":
-            handle_call_departure(current_simulation_time, current_event.event_data, fel)
+            handle_call_departure(sim_state["simulation_time"], current_event.event_data, fel, sim_params, sim_state)
         else:
             print(f"  AVISO: Tipo de evento desconhecido: {current_event.event_type}")
 
-    # Fim da simulação
+    # Contabilizar o último período de ocupação, caso o loop tenha esvaziado a FEL antes de max_simulation_time
+    if sim_state["time_of_last_occupancy_change"] < sim_state["simulation_time"]: 
+        delta_t_final = sim_state["simulation_time"] - sim_state["time_of_last_occupancy_change"]
+        sim_state["cumulative_channel_occupancy_time"] += sim_state["channels_occupied"] * delta_t_final
+        sim_state["occupancy_log"].append((sim_state["simulation_time"], sim_state["channels_occupied"]))
+    elif not processed_event_count and not initial_fel_events : 
+        if sim_state["simulation_time"] == 0 and max_simulation_time > 0:
+            sim_state["cumulative_channel_occupancy_time"] += sim_state["channels_occupied"] * max_simulation_time
+            sim_state["occupancy_log"].append((max_simulation_time, sim_state["channels_occupied"]))
+            sim_state["simulation_time"] = max_simulation_time
+
+    print(f"\n--- ESTATÍSTICAS DA SIMULAÇÃO ---")
+    print(f"Total de Novas Chamadas Geradas: {sim_state['total_new_calls_generated']}")
+    print(f"Total de Chamadas Aceitas: {sim_state['total_calls_accepted']}")
+    print(f"Total de Chamadas Bloqueadas: {sim_state['total_calls_blocked']}")
+    print(f"Total de Chamadas Concluídas (Partidas): {sim_state['total_calls_departed']}")
+    
+    if sim_state['total_new_calls_generated'] > 0:
+        prob_bloqueio_estimada = sim_state['total_calls_blocked'] / sim_state['total_new_calls_generated']
+        print(f"Probabilidade de Bloqueio Estimada (Novas Chamadas): {prob_bloqueio_estimada:.4f}")
+    else:
+        print("Probabilidade de Bloqueio Estimada (Novas Chamadas): N/A (nenhuma nova chamada gerada)")
+
+    effective_simulation_duration = sim_state["simulation_time"]
+    
+    # Usar sim_params.get("C_total", 0) para evitar KeyError se C_total não estiver em sim_params
+    c_total_for_stats = sim_params.get("C_total", 0) 
+    if c_total_for_stats > 0 and effective_simulation_duration > 0:
+        utilizacao_media = sim_state["cumulative_channel_occupancy_time"] / (c_total_for_stats * effective_simulation_duration)
+        print(f"Utilização Média de Canais: {utilizacao_media:.4f}")
+    else:
+        print("Utilização Média de Canais: N/A (C_total ou tempo de simulação é zero)")
+    
+    if effective_simulation_duration > 0 and sim_state['total_new_calls_generated'] > 0 :
+        print(f"Taxa Média de Geração Observada (Novas Chamadas): {sim_state['total_new_calls_generated'] / effective_simulation_duration:.4f} chamadas/un.tempo")
+    else:
+        print("Taxa Média de Geração Observada (Novas Chamadas): N/A (tempo de simulação efetivo foi zero ou não houve eventos gerados)")
+
+    print(f"Log de Ocupação (tempo, canais_ocupados): {sim_state['occupancy_log']}")
+
     print(f"\n--- Simulação Concluída ---")
-    print(f"Tempo final da simulação: {current_simulation_time:.2f}")
-    print(f"Total de eventos processados: {event_count}")
+    print(f"Tempo final da simulação: {sim_state['simulation_time']:.2f}")
+    print(f"Total de eventos processados: {processed_event_count}") 
     if fel.is_empty():
         print("FEL está vazia.")
     else:
-        print(f"FEL não está vazia. Próximo evento agendado para: {fel.peek_next_event_time():.2f}")
-
-    # Aqui, normalmente se retornaria ou salvaria estatísticas da simulação
-    # return collected_stats
+        next_event_peek_time = fel.peek_next_event_time()
+        if next_event_peek_time is not None:
+             print(f"FEL não está vazia. Próximo evento agendado para: {next_event_peek_time:.2f}")
+        else: 
+             print("FEL não está vazia, mas não foi possível espiar o próximo evento.")
 
 if __name__ == "__main__":
-    print("--- Testando o Núcleo da Simulação ---")
+    print("--- Testando o Núcleo da Simulação com Geração Dinâmica de Chamadas ---")
 
-    # 1. Crie uma Lista de Eventos de Exemplo
-    event_nc1 = SimEvent(event_time=10.0, event_type="CHEGADA_NOVA_CHAMADA", event_data={"classe_servico": "premium", "id_chamada": "NC001"})
-    event_ho1 = SimEvent(event_time=5.2, event_type="CHEGADA_HANDOVER", event_data={"id_chamada_antiga": "HO_Prev002", "id_chamada_nova": "HO002"})
-    event_dep1 = SimEvent(event_time=12.5, event_type="PARTIDA_CHAMADA", event_data={"id_chamada_finalizada": "NC001_simulada"})
-    event_nc2_tarde = SimEvent(event_time=101.0, event_type="CHEGADA_NOVA_CHAMADA", event_data={"id_chamada": "NC003_tarde"}) # Para testar max_simulation_time
-    event_outro = SimEvent(event_time=15.0, event_type="EVENTO_ESPECIAL", event_data={"detalhe": "teste"})
+    initial_events_for_generator_test: List[SimEvent] = []
+    sim_params_test = {
+        "C_total": 5, 
+        "mean_service_time": 3.0, 
+        "lambda_new_calls": 2.0, 
+        "max_simulation_time": 1000.0 
+    }
 
+    sim_state_test = {
+        "simulation_time": 0.0,
+        "channels_occupied": 0,
+        "time_of_last_occupancy_change": 0.0,
+        "next_call_id_counter": 1,
+        "total_new_calls_generated": 0,
+        "total_ho_calls_generated": 0,
+        "total_calls_accepted": 0,
+        "total_calls_blocked": 0,
+        "total_calls_departed": 0,
+        "cumulative_channel_occupancy_time": 0.0,
+        "occupancy_log": [(0.0, 0)] 
+    }
+    
+    print(f"\nIniciando teste do gerador com sim_params={sim_params_test}")
+    run_simulation(initial_events_for_generator_test, sim_params_test, sim_state_test)
+    
+    print("\n--- Fim dos Testes do Núcleo da Simulação ---")
 
-    initial_events = [event_nc1, event_ho1, event_dep1, event_nc2_tarde, event_outro]
-    # Adicionando um evento com o mesmo tempo para verificar a ordem de desempate (pelo tipo de evento string)
-    event_nc_mesmo_tempo = SimEvent(event_time=10.0, event_type="CHEGADA_OUTRA_NOVA_CHAMADA", event_data={"id_chamada": "NC002_mesmo_tempo"})
-    initial_events.append(event_nc_mesmo_tempo)
+    # Código de plotagem
+    if sim_state_test.get("occupancy_log") and len(sim_state_test["occupancy_log"]) > 1:
+        tempos = [entry[0] for entry in sim_state_test["occupancy_log"]]
+        ocupacoes = [entry[1] for entry in sim_state_test["occupancy_log"]]
 
+        max_time_param = sim_params_test.get("max_simulation_time", tempos[-1] if tempos else 0) 
+        if tempos and tempos[-1] < max_time_param:
+            tempos.append(max_time_param)
+            ocupacoes.append(ocupacoes[-1]) 
 
-    # 2. Defina max_simulation_time
-    max_sim_time = 100.0
+        plt.figure(figsize=(12, 6))
+        plt.step(tempos, ocupacoes, where='post', label=f'Canais Ocupados (C_total={sim_params_test.get("C_total", "N/A")})')
+        plt.xlabel("Tempo da Simulação")
+        plt.ylabel("Número de Canais Ocupados")
+        plt.title(f"Ocupação de Canais (Lambda={sim_params_test.get('lambda_new_calls', 'N/A'):.1f}, Serv={sim_params_test.get('mean_service_time', 'N/A'):.1f})")
+        
+        y_ticks_upper_bound = sim_params_test.get("C_total", 0) + 2
+        if sim_params_test.get("C_total", 0) == 0: 
+            y_ticks_upper_bound = 2 
+        plt.yticks(range(y_ticks_upper_bound))
+        
+        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.legend()
+        plt.tight_layout()
+        
+        plot_filename = "occupancy_chart.png"
+        try:
+            plt.savefig(plot_filename)
+            print(f"\nGráfico de ocupação de canais salvo como {plot_filename}")
+        except Exception as e_plot:
+            print(f"  ERRO ao salvar gráfico: {e_plot}")
+    else:
+        print("\nLog de ocupação vazio ou com poucos dados em sim_state_test, nenhum gráfico de ocupação para gerar.")
 
-    # 3. Chame a Função de Simulação
-    run_simulation(initial_events, max_sim_time)
-
-    print("\n--- Teste com FEL Inicial Vazia ---")
-    run_simulation([], max_sim_time)
-
-    print("\n--- Teste com Tempo Máximo de Simulação Menor que Todos os Eventos ---")
-    run_simulation(initial_events, 1.0)
+[end of simulation_core.py]
