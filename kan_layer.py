@@ -85,13 +85,31 @@ def get_knots(start, end, n_bases=5, spline_order=3):
     else: # n_bases > spline_order -1
         m = spline_order - 1
         nk = n_bases - m # number of interior knots
-        dknots = (end_calc - start_calc) / (nk - 1)
-        knots = torch.linspace(
-            start=start_calc - dknots * (m + 1),
-            end=end_calc + dknots * (m + 1),
-            steps=nk + 2 * (m + 1) # Original had m+2, typo? should be 2*m+2 or 2*(m+1)
-                                    # nk + 2m + 2
-        )
+
+        if nk == 1:
+            # Handle the case with one interior knot to avoid division by zero.
+            # dknots_val is defined to represent a characteristic spacing.
+            # If nk=1, the "interior segment" is the range itself.
+            dknots_val = (end_calc - start_calc)
+            if dknots_val == 0: # If start_calc and end_calc were identical (after initial x_range adjustment)
+                dknots_val = torch.tensor(1.0e-4) # A small non-zero value to prevent issues in linspace
+
+            knots = torch.linspace(
+                start=start_calc - dknots_val * (m + 1),
+                end=end_calc + dknots_val * (m + 1),
+                steps=nk + 2 * (m + 1) # nk is 1, so steps = 1 + 2*(m+1)
+            )
+        else: # nk > 1
+            dknots = (end_calc - start_calc) / (nk - 1)
+            # Ensure dknots is not zero (already covered by x_range check, but as a safeguard)
+            if dknots == 0: # This case should ideally not be reached if x_range > 0 and nk > 1
+                 dknots = torch.tensor(1.0e-4)
+
+            knots = torch.linspace(
+                start=start_calc - dknots * (m + 1),
+                end=end_calc + dknots * (m + 1),
+                steps=nk + 2 * (m + 1)
+            )
     return knots.float()
 
 
@@ -101,7 +119,8 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
         raise ValueError("x has to be 1 dimentional for get_X_spline")
 
     # Ensure knots and other params for tck are on the same device as x if possible, or CPU for scipy
-    knots_np = knots.cpu().numpy()
+    # Ensure float64 for scipy compatibility
+    knots_np = knots.cpu().numpy().astype(np.float64)
 
     # tck for scipy: knots, coefficients (c), degree (k)
     # Scipy's BSpline uses degree k (spline_order).
@@ -110,12 +129,14 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
     # X will be (len(x), n_bases)
 
     X_spl = torch.zeros([len(x), n_bases], dtype=x.dtype, device=x.device)
-    x_np = x.detach().cpu().numpy() # Ensure detach before converting to numpy
+    # Ensure float64 for scipy compatibility
+    x_np = x.detach().cpu().numpy().astype(np.float64)
 
     for i in range(n_bases):
         # Create a coefficient vector for the i-th basis function
         # This is a standard way to evaluate individual basis functions with splev
-        vec_c = np.zeros(n_bases)
+        # Ensure float64 for scipy compatibility
+        vec_c = np.zeros(n_bases, dtype=np.float64)
         vec_c[i] = 1.0
 
         # Construct tck for the i-th basis function.
@@ -154,6 +175,21 @@ def get_X_spline(x, knots, n_bases=5, spline_order=3, add_intercept=True):
         # It seems the original code's `n_bases` corresponds to `len(c)`.
         # And `spline_order` to `k` (degree).
 
+        # Assertion for SciPy's splev: len(c) == len(knots) - k - 1
+        # Here, len(c) is n_bases (as vec_c has length n_bases), k is spline_order.
+        expected_knot_len = n_bases + spline_order + 1
+        if not np.isclose(len(knots_np), expected_knot_len): # Using isclose for float comparisons if needed, but lengths are int. Direct == is fine.
+            # print(f"Debug: n_bases={n_bases}, spline_order={spline_order}, len(knots_np)={len(knots_np)}, expected_knot_len={expected_knot_len}")
+            raise AssertionError(
+                f"Knot vector length is inconsistent with n_bases and spline_order for SciPy. "
+                f"Expected {expected_knot_len} knots, but got {len(knots_np)} for n_bases={n_bases} and spline_order={spline_order}."
+            )
+
+        # The actual tck tuple uses vec_c of length n_bases.
+        # SciPy's check is len(c) == M - k - 1 where M is num knots, k is degree.
+        # So n_bases == len(knots_np) - spline_order - 1 must hold.
+        # This is equivalent to len(knots_np) == n_bases + spline_order + 1.
+        # The assertion above checks this.
         tck_for_splev = (knots_np, vec_c, spline_order) # Assuming spline_order is degree
 
         basis_eval_np = si.splev(x_np, tck_for_splev, der=0)
